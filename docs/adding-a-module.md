@@ -12,7 +12,7 @@ Responda no papel:
 - Qual tabela este módulo possui? (só ele escreve nela)
 - Quais rotas existem e quais permissões cada uma exige?
 - Qual o contrato JSON de entrada e saída?
-- O `POST` é idempotente? Precisa de `Idempotency-Key`?
+- O `POST` cria recurso? Então exige `Idempotency-Key` e devolve `Location`.
 - Quem mais precisa dos dados? (esses módulos chamarão o **service**)
 
 ## 1. Migration
@@ -102,11 +102,15 @@ Se a entidade gerada diferir do esperado, o problema está na migration — não
 ```text
 src/modules/notes/
 ├── mod.rs
-├── controller.rs
-├── dto.rs
+├── controller.rs       # ou controller/{mod,collection,item}.rs
+├── dto.rs              # ou dto/{mod,list,output,write}.rs
 ├── repository.rs
-└── service.rs
+└── service.rs          # ou service/{mod,lookup,create,update}.rs
 ```
+
+Comece com arquivo único. Ao passar dos alvos (controller 120, service 150,
+repository 150, dto 80 linhas), quebre por sub-recurso como em
+`modules/users`; o `mod.rs` continua reexportando a API pública.
 
 ```rust
 // src/modules/notes/mod.rs
@@ -361,7 +365,8 @@ O `/api/v1` é aplicado uma única vez em `routes/openapi.rs`, que também gera 
 - Regra de service: teste unitário no próprio arquivo (`#[cfg(test)]`).
 - Endpoint: teste de integração com testcontainers em `tests/`.
 - Autorização: um teste provando 401 sem token e 403 sem permissão.
-- Todo `POST` com `Idempotency-Key`: teste de repetição não duplicando.
+- `POST` de recurso sem `Idempotency-Key` → `400`; com a chave, repetir devolve a
+  mesma resposta (inclusive `Location`) sem duplicar.
 
 ```bash
 just fmt && just lint && just test

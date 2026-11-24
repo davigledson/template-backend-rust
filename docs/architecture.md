@@ -165,7 +165,7 @@ Quatro camadas transversais, cada uma com um custo e uma decisão:
 |---|---|---|
 | IP do cliente | `core/client_ip.rs` | só confia em `X-Forwarded-For` com `server.trust_proxy_headers = true` |
 | Rate limit | `core/auth/rate_limit.rs` | janela fixa no Redis, por conta e IP; fail-open |
-| Idempotência | `core/idempotency.rs` | `Idempotency-Key` opcional; resposta 24 h; lock 60 s |
+| Idempotência | `core/idempotency.rs` | obrigatória em `POST` de recurso; resposta 24 h; lock 60 s |
 | Métricas | `core/metrics.rs` | recorder global via `OnceLock`; `/metrics` fora da medição |
 
 O rate limit é aplicado no service de login, depois da validação do corpo e
@@ -173,9 +173,15 @@ antes de consultar senha: e-mail inexistente e senha errada contam igual, sem
 enumeração. A chave usa SHA-256 do e-mail normalizado e do IP, então o Redis não
 guarda PII.
 
-A idempotência assina método, caminho, hash do `Authorization` e a chave. Isso
-impede que a mesma chave usada por outro usuário reproduza a resposta alheia.
-Repetir durante a primeira execução devolve `409`; resposta `5xx` não é gravada.
+A idempotência assina método, caminho, `sub` do access token e a chave. Usar o
+`sub` (e não o token inteiro) mantém o replay válido após renovar o access
+token, e ainda impede que a chave de um usuário reproduza a resposta de outro.
+O replay devolve status, `content-type`, `location`, `etag` e corpo; repetir
+durante a primeira execução devolve `409`; `5xx` não é gravado.
+
+`/api/v1/auth/*` fica fora do middleware: a resposta carrega tokens de sessão e
+um replay devolveria refresh já rotacionado, o que revogaria a família. A regra
+é "`POST` de recurso sob `/api/v1` exige a chave; sessão não é recurso".
 
 ## Observabilidade
 

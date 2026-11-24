@@ -25,7 +25,7 @@ módulos donos das suas rotas/regras/tabelas e um `core` fino de infraestrutura.
 | `just` | sim | todos os comandos do projeto |
 | `cargo-nextest` | recomendada | `just test` |
 | `sea-orm-cli` 2.0.4 | só ao mexer no schema | `just entities` |
-| `cargo-insta`, `cargo-deny` | CI/snapshots | OpenAPI e licenças |
+| `cargo-deny` | sim (CI) | licenças, advisories e fontes |
 
 ```bash
 # Arch/CachyOS
@@ -175,19 +175,37 @@ O extractor `AuthUser` é stateless; rotas sensíveis chamam
 
 ### Idempotência
 
-`POST` aceita `Idempotency-Key` (até 128 caracteres ASCII). A primeira execução
-grava a resposta por 24 h; repetir a mesma chave devolve a mesma resposta sem
-repetir o efeito. Enquanto a primeira ainda está em andamento, a repetição
-recebe `409`. A assinatura inclui o hash do `Authorization`, então a chave de um
-usuário não reproduz a resposta de outro. Sem o cabeçalho, o comportamento é o
-normal; Redis fora do ar também segue sem idempotência (fail-open).
+Todo `POST` de recurso sob `/api/v1` exige `Idempotency-Key` (até 128
+caracteres ASCII); sem o cabeçalho a resposta é `400`. A primeira execução grava
+status, `content-type`, `location`, `etag` e corpo por 24 h; repetir a mesma
+chave devolve exatamente aquela resposta, sem repetir o efeito. Enquanto a
+primeira ainda está em andamento, a repetição recebe `409`.
+
+A assinatura é método + caminho + `sub` do access token + a chave. Como usa o
+`sub` (e não o token inteiro), renovar o access token não perde o replay, e a
+chave de um usuário não reproduz a resposta de outro. Resposta `5xx` não é
+gravada; Redis fora do ar segue sem idempotência (fail-open).
+
+`/api/v1/auth/*` fica **fora** da idempotência: a resposta carrega tokens e um
+replay devolveria um refresh já rotacionado, o que dispararia a revogação da
+família. Sessão não é uma operação de negócio idempotente.
+
+```http
+POST /api/v1/users
+Idempotency-Key: 1c0a1f3f-6f2f-4a2b-9e0a-5c2b1a0d9e11
+Authorization: Bearer <access>
+Content-Type: application/json
+
+201 Created
+Location: /api/v1/users/01926f3a-...
+```
 
 ## Gestão de usuários (admin)
 
 | Rota | Permissão | O que faz |
 |---|---|---|
 | `GET /api/v1/users` | `users:read` | lista com `page`, `perPage`, `search`, `role`, `active` |
-| `POST /api/v1/users` | `users:write` | cria usuário (não existe cadastro público) |
+| `POST /api/v1/users` | `users:write` | cria usuário (não existe cadastro público); exige `Idempotency-Key` e devolve `Location` |
 | `GET /api/v1/users/{id}` | `users:read` | detalhe |
 | `PATCH /api/v1/users/{id}` | `users:write` | atualiza `name`, `email`, `role`, `active` |
 | `DELETE /api/v1/users/{id}` | `users:delete` | soft delete (`active = false`), idempotente |
@@ -292,6 +310,9 @@ src/
     └── openapi.rs          # /docs e /api-docs/openapi.json
 
 tests/                      # integração com testcontainers
+├── common/mod.rs           # containers, login e mailers de teste
+├── api_flow.rs             # auth, perfil, usuários, rate limit, idempotência
+└── email_flow.rs           # outbox, dedupe e retry
 .github/workflows/ci.yml    # fmt, clippy, nextest, deny e docker build
 Dockerfile                  # imagem multi-stage, non-root
 

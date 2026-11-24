@@ -157,7 +157,7 @@ interna.
 | Força bruta de senha | Argon2id + rate limit por conta (5) e por IP (20) em 15 min; `429` com `Retry-After` |
 | Token roubado (access) | TTL curto + `require_session` nas rotas sensíveis |
 | Token roubado (refresh) | rotação atômica, hash no Redis, `token_version` e revogação de família no reuso |
-| Repetição de `POST` | `Idempotency-Key` com resposta gravada por 24 h |
+| Repetição de `POST` | `Idempotency-Key` obrigatória em recurso, resposta gravada por 24 h |
 | Escalada de privilégio | permissão checada no servidor; papel validado no banco |
 | Enumeração de contas | mesma resposta para e-mail inexistente/senha errada |
 | Injeção SQL | SeaORM parametrizado; sem SQL concatenado |
@@ -178,10 +178,13 @@ interna.
 
 ## Idempotência
 
-- `Idempotency-Key` é opcional; quando presente, a assinatura inclui método,
-  caminho, hash do `Authorization` e a chave.
-- A primeira execução grava status, `content-type` e corpo por 24 h; repetição
-  devolve a mesma resposta.
+- `Idempotency-Key` é **obrigatória** em `POST` de recurso sob `/api/v1`; sem
+  ela a resposta é `400`. A assinatura inclui método, caminho, `sub` do access
+  token e a chave.
+- A primeira execução grava status, `content-type`, `location`, `etag` e corpo
+  por 24 h; repetição devolve a mesma resposta.
+- `/api/v1/auth/*` fica fora: cachear resposta com tokens permitiria replay de
+  refresh já rotacionado e derrubaria a família inteira.
 - Enquanto a primeira execução está em andamento, a repetição recebe `409`.
 - `5xx` não é gravado, para permitir retry.
 - Redis fora do ar é fail-open: a requisição segue, mas sem garantia de

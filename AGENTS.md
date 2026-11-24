@@ -92,17 +92,20 @@ routes → modules/<feature> → core
 
 | Camada | Pode | Não pode |
 |---|---|---|
-| `controller.rs` | extrair, validar via DTO, chamar service, responder | SQL, regra, Redis |
-| `service.rs` | regra, transação, orquestrar repositórios | conhecer HTTP |
+| `controller/` | extrair, validar via DTO, chamar service, responder | SQL, regra, Redis |
+| `service/` | regra, transação, orquestrar repositórios | conhecer HTTP |
 | `repository.rs` | query SeaORM (recebe a conexão) | validar, decidir status |
-| `dto.rs` | serde + validação + schema | lógica |
+| `dto/` | serde + validação + schema | lógica |
 | `entity/` | mapeamento gerado | ser editado à mão |
 | `core/` | infraestrutura genérica | regra de feature |
 
 `service.rs` é opcional em CRUD puro; regra ou transação exige service.
 
 Alvos de tamanho: controller ≤120, service ≤150, repository ≤150, dto ≤80 linhas.
-Passou disso, quebre por sub-recurso — não crie camada nova.
+Passou disso, quebre por sub-recurso — não crie camada nova. `modules/users` é o
+exemplo: `controller/{collection,item,password}.rs`,
+`service/{lookup,create,update,deactivate,credentials,profile,session,rules}.rs`
+e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 
 ## Auth e permissões
 
@@ -156,9 +159,14 @@ Passou disso, quebre por sub-recurso — não crie camada nova.
 - `404`/`405` também em Problem Details.
 - Documentação: `/docs` (Scalar) e `/api-docs/openapi.json`. Todo handler novo tem
   `#[utoipa::path]` e entra no mesmo router via `routes!`.
-- `POST` sem ID natural exige `Idempotency-Key`; retry nunca duplica.
-  O middleware grava a resposta por 24 h e assina método + caminho + hash do
-  `Authorization`; repetição em andamento recebe `409`.
+- `POST` de recurso sob `/api/v1` **exige** `Idempotency-Key` (sem ela, `400`);
+  retry nunca duplica. O middleware grava status, `content-type`, `location`,
+  `etag` e corpo por 24 h. A assinatura é método + caminho + `sub` do access
+  token + a chave; renovar o token não perde o replay. Repetição em andamento
+  recebe `409`; `5xx` não é gravado.
+- `/api/v1/auth/*` está fora da idempotência: a resposta carrega tokens e um
+  replay devolveria refresh já rotacionado, disparando a revogação da família.
+- `POST` que cria recurso devolve `Location` com a URL do recurso.
 - Mudança breaking de contrato só com depreciação e aviso.
 
 ## Segurança
@@ -184,8 +192,11 @@ Passou disso, quebre por sub-recurso — não crie camada nova.
 ## Testes
 
 - Toda regra de service tem teste unitário.
-- Todo endpoint novo tem teste de integração (testcontainers), como em
-  `tests/users_flow.rs`.
+- Todo endpoint novo tem teste de integração (testcontainers) em
+  `tests/api_flow.rs`; o outbox fica em `tests/email_flow.rs`. Os helpers
+  (containers, login, mailers) estão em `tests/common/mod.rs`.
+- Cada binário de teste sobe seu Postgres/Redis: nada de estado compartilhado
+  entre fluxos.
 - Autorização e idempotência têm teste próprio.
 - O snapshot do OpenAPI (`routes::openapi`) deve continuar verde; com mudança
   intencional de contrato, rode `INSTA_UPDATE=always cargo test --lib routes::openapi`
@@ -265,7 +276,8 @@ Se não couber em uma pasta, o módulo está grande demais.
 - O recorder Prometheus é global e instalado uma vez (`core::metrics`); não chame
   `PrometheusMetricLayer::pair()` direto em teste.
 - Idempotência usa lock de 60 s e resposta de 24 h; o `Idempotency-Key` entra no
-  hash, não no log.
+  hash, não no log. O Redis guarda só a resposta (sem tokens de sessão, porque
+  `/auth/*` está fora).
 - A imagem Docker não copia `tests/`; o build usa `--locked` e roda como UID 10001.
 
 ## Git

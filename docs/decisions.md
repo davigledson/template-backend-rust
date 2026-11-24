@@ -341,3 +341,28 @@ Sem o cabeçalho, o comportamento é o normal. Redis fora do ar é fail-open.
 **Consequência**: retry seguro fica a cargo do cliente, mas o template oferece o
 mecanismo pronto. A resposta gravada não pode conter segredo além do que o
 próprio endpoint já devolve.
+
+---
+
+## 2026-11-24 — Fase 8: idempotência obrigatória, `sub` na assinatura e `/auth` fora
+
+**Contexto**: a fase 7 deixou três arestas. (1) O middleware cobria qualquer
+`POST`, inclusive `/auth/login` e `/auth/refresh`: com `Idempotency-Key`, a
+resposta com tokens ficava 24 h no Redis e um replay após rotação devolvia um
+refresh já usado, disparando a revogação da família. (2) O `AGENTS.md` dizia que
+`POST` sem ID natural exige a chave, mas o código só a honrava se existisse.
+(3) A assinatura usava o hash do `Authorization`, então renovar o access token
+fazia o retry legítimo perder o replay.
+
+**Decisão**: (1) só `POST` sob `/api/v1` de recurso exige a chave, e
+`/api/v1/auth/*` fica de fora; (2) `Idempotency-Key` ausente devolve `400`;
+(3) a assinatura usa o claim `sub` do token (com hash do cabeçalho como
+fallback para token inválido); (4) o replay preserva apenas `content-type`,
+`location` e `etag`; (5) `POST /users` devolve `Location`.
+
+**Consequência**: o contrato fica estrito e previsível; clientes precisam enviar
+o cabeçalho em criação. Sessões nunca são cacheadas no Redis de idempotência.
+
+**Revisitar se**: aparecer `POST` público (ex.: contato, webhook de entrada) em
+que exigir a chave seja atrito desnecessário — aí a exceção entra na mesma lista
+de `/auth`.

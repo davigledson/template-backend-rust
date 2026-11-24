@@ -62,10 +62,15 @@ permissão.
 ## Testes de integração
 
 Dependências já no `Cargo.toml`: `axum-test`, `testcontainers` 0.27 e
-`testcontainers-modules` 0.15 (`postgres`, `redis`). O exemplo real é
-`tests/users_flow.rs`: sobe Postgres 18 e Redis 8, aplica migrations, cria o
-admin e percorre criação, listagem, autorização, troca de papel, soft delete,
-reset de senha, outbox de e-mail e OpenAPI.
+`testcontainers-modules` 0.15 (`postgres`, `redis`). Os helpers ficam em
+`tests/common/mod.rs` (`Harness::spawn`, login, mailers) e cada binário sobe seu
+próprio Postgres 18 e Redis 8:
+
+- `tests/api_flow.rs`: criação, listagem, autorização, troca de papel, soft
+  delete, reset de senha, perfil, refresh, rate limit, idempotência, OpenAPI e
+  métricas;
+- `tests/email_flow.rs`: outbox, entrega, dedupe, retry com backoff e
+  reprocessamento.
 
 O bloco de outbox prova as garantias:
 
@@ -75,9 +80,12 @@ O bloco de outbox prova as garantias:
 - falha do `Mailer` volta para `pending` com `attempts` incrementado e
   `last_error` preenchido.
 
-O mesmo teste cobre rate limit (5 falhas → `429`), reuso de refresh (família
-revogada), idempotência (repetir o `POST` devolve o mesmo id e não duplica) e
-`/metrics` com `axum_http_requests_total`.
+`tests/api_flow.rs` cobre rate limit (5 falhas → `429`), reuso de refresh
+(família revogada) e `/metrics` com `axum_http_requests_total`. A idempotência
+tem asserções próprias: `POST` sem chave → `400`; mesma chave → mesmo id,
+`Location` preservado e nada duplicado; login com a mesma chave → tokens
+diferentes; replay após renovar o access token continua devolvendo a primeira
+resposta.
 
 Esqueleto de um teste de auth:
 
@@ -111,7 +119,8 @@ async fn login_e_me() {
 
 Regras para integração:
 
-- **container por suíte**, não por teste (subir Postgres custa segundos);
+- **container por binário de teste**, não por teste (subir Postgres custa
+  segundos); use `Harness` para compartilhar dentro do mesmo fluxo;
 - migrations rodam no setup (`Migrator::up`);
 - cada teste usa dados próprios (e-mail único) e não assume ordem;
 - teste sempre asserta status, `content-type` e o campo relevante;
@@ -127,7 +136,9 @@ Regras para integração:
 - [ ] recurso inexistente → 404
 - [ ] conflito/duplicidade → 409
 - [ ] isolamento: usuário A não acessa recurso de B
-- [ ] `POST` com `Idempotency-Key`: repetir não duplica
+- [ ] `POST` sem `Idempotency-Key` → 400 (recurso sob `/api/v1`)
+- [ ] `POST` com `Idempotency-Key`: repetir devolve a mesma resposta (incluindo
+      `Location`) e não duplica
 
 ## Teste de contrato do OpenAPI
 
