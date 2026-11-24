@@ -110,6 +110,10 @@ Passou disso, quebre por sub-recurso — não crie camada nova.
 - Primeiro admin **só por CLI** (`just admin-create`). Nunca rota pública nem seed
   com senha.
 - Access token: 15 min. Refresh: opaco, hasheado no Redis, rotação com `GETDEL`.
+- Perfil próprio: `PATCH /auth/me` (nome) e `PUT /auth/me/password` (senha atual
+  + nova), ambos com `PROFILE_WRITE` e `require_session`.
+- Troca de senha incrementa `token_version` e derruba **todas** as sessões; não
+  emite par novo, o usuário faz login de novo.
 
 ## E-mail e jobs
 

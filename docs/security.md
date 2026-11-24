@@ -86,6 +86,16 @@ No refresh, além de consumir o token, o serviço confere se o `token_version`
 armazenado ainda bate com o do banco. No access token, quem garante é
 `require_session`.
 
+### Troca da própria senha
+
+`PUT /auth/me/password` exige a senha atual, recusa a nova igual à atual e
+incrementa `token_version`. O efeito é deliberado: **todas** as sessões caem,
+inclusive a que fez a troca, e o usuário faz login de novo. Um par novo emitido
+na hora manteria viva uma sessão que pode estar comprometida; o custo de um
+login extra é aceitável.
+
+O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
+
 > **Pendente (fase 7)**: detecção de reuso de refresh token com revogação da
 > família. Hoje, reusar um token já consumido só falha; não derruba as sessões
 > derivadas dele.

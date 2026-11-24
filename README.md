@@ -110,11 +110,15 @@ Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
 | `POST /api/v1/auth/refresh` | rotaciona o par; o refresh antigo deixa de valer |
 | `POST /api/v1/auth/logout` | revoga o refresh token (204) |
 | `GET /api/v1/auth/me` | perfil do usuário autenticado (Bearer) |
+| `PATCH /api/v1/auth/me` | altera o próprio nome (`profile:write`) |
+| `PUT /api/v1/auth/me/password` | senha atual + nova; encerra todas as sessões (204) |
 
 - Senha: **Argon2id**, mínimo de 12 caracteres.
 - Access token: JWT HS256 com `sub`, `role`, `token_version`, `jti`, `iat`, `exp`, `iss`, `aud`.
 - Refresh token: opaco, guardado **hasheado** no Redis e consumido com `GETDEL` (rotação atômica).
 - `token_version` sobe ao trocar senha/papel ou desativar: invalida refresh tokens e sessões sensíveis na hora.
+- A troca da própria senha exige a senha atual, incrementa `token_version` e
+  derruba **todas** as sessões, inclusive a que fez a troca; o login é refeito.
 - Papéis: `admin` e `user`. Handlers checam **permissão**, nunca papel:
 
 ```rust

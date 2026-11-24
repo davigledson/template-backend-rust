@@ -150,6 +150,9 @@ Detalhes de ameaça e decisão estão em [`security.md`](security.md). Em resumo
   e invalida refresh tokens e sessões sensíveis imediatamente.
 - Autorização por **permissão** (`auth.require(USERS_WRITE)`), não por `if role
   == "admin"`. Assim, adicionar um papel novo não exige caçar comparações.
+- **Perfil próprio** (`PATCH /auth/me`, `PUT /auth/me/password`) usa
+  `profile:write`; a troca de senha confere a senha atual e encerra todas as
+  sessões via `token_version`.
 
 ## E-mail e worker
 

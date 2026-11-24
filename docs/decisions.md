@@ -277,3 +277,18 @@ latência e perda ao caminho HTTP).
 **Consequência**: entrega at-least-once, sem perda em restart; exige limpeza de
 `sent` antigos (job diário) e tolerância a duplicata no provedor. Para métrica e
 log, outbox é exagero: use `tokio::spawn` ou um job direto.
+
+---
+
+## 2026-11-24 — Troca da própria senha encerra todas as sessões
+
+**Contexto**: `PUT /auth/me/password` poderia devolver um par novo e manter o
+usuário logado, ou exigir login novamente.
+
+**Decisão**: verificar a senha atual, incrementar `token_version` e devolver
+`204`. Todas as sessões caem, inclusive a que fez a troca; nenhum token novo é
+emitido.
+
+**Consequência**: quem trocou a senha faz um login extra, mas uma sessão
+possivelmente comprometida não sobrevive à troca. O aviso de alteração entra no
+outbox na mesma transação.
