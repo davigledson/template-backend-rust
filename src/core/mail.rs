@@ -10,8 +10,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use lettre::{
-    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor, address::AddressError,
-    message::Mailbox, transport::smtp::Error as SmtpError,
+    AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+    address::AddressError,
+    message::{Mailbox, header::ContentType},
+    transport::smtp::Error as SmtpError,
 };
 use thiserror::Error;
 
@@ -89,11 +91,7 @@ pub struct SmtpMailer {
 #[async_trait]
 impl Mailer for SmtpMailer {
     async fn send(&self, message: &EmailMessage) -> Result<(), MailerError> {
-        let email = Message::builder()
-            .from(self.from.clone())
-            .to(message.to.parse::<Mailbox>()?)
-            .subject(message.subject.clone())
-            .body(message.body.clone())?;
+        let email = build_message(&self.from, message)?;
 
         self.transport
             .send(email)
@@ -102,6 +100,18 @@ impl Mailer for SmtpMailer {
 
         Ok(())
     }
+}
+
+fn build_message(from: &Mailbox, message: &EmailMessage) -> Result<Message, MailerError> {
+    Message::builder()
+        .from(from.clone())
+        .to(message.to.parse::<Mailbox>()?)
+        .subject(message.subject.clone())
+        // Sem o charset explícito o cliente pode interpretar o corpo como
+        // Latin-1 e exibir "OlÃ¡" no lugar de "Olá".
+        .header(ContentType::TEXT_PLAIN)
+        .body(message.body.clone())
+        .map_err(MailerError::from)
 }
 
 /// Mascara o endereço para log sem vazar o dado completo.
@@ -134,6 +144,25 @@ mod tests {
             smtp_url: String::new(),
         };
         assert!(from_settings(&settings).is_ok());
+    }
+
+    #[test]
+    fn mensagem_declara_utf8() {
+        let from: Mailbox = "nao-responda@teste.local".parse().expect("remetente");
+        let message = EmailMessage {
+            to: "ana@teste.local".to_owned(),
+            subject: "Sua conta foi criada".to_owned(),
+            body: "Olá, Ana.".to_owned(),
+        };
+
+        let built = build_message(&from, &message).expect("mensagem");
+        let raw = String::from_utf8(built.formatted()).expect("utf-8");
+
+        assert!(
+            raw.contains("Content-Type: text/plain; charset=utf-8"),
+            "{raw}"
+        );
+        assert!(raw.contains("Ol=C3=A1"), "{raw}");
     }
 
     #[test]
