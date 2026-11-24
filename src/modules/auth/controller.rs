@@ -6,6 +6,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use crate::{
     core::{
         auth::{extractor::AuthUser, permission::PROFILE_WRITE},
+        client_ip::ClientIp,
         error::AppError,
         extract::ValidatedJson,
         openapi::Problem,
@@ -44,13 +45,17 @@ pub fn router() -> OpenApiRouter<AppState> {
         (status = 400, description = "JSON inválido", body = Problem),
         (status = 401, description = "Credenciais inválidas", body = Problem),
         (status = 422, description = "Validação falhou", body = Problem),
+        (status = 429, description = "Muitas tentativas de login", body = Problem),
     )
 )]
 async fn login(
     State(state): State<AppState>,
+    client_ip: ClientIp,
     ValidatedJson(body): ValidatedJson<LoginRequest>,
 ) -> Result<Json<TokenResponse>, AppError> {
-    Ok(Json(service::login(&state, body).await?))
+    Ok(Json(
+        service::login(&state, body, client_ip.as_str()).await?,
+    ))
 }
 
 #[utoipa::path(

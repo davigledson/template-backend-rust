@@ -78,10 +78,13 @@ async fn run(settings: Settings) -> Result<(), AppError> {
 
     tracing::info!(address = %address, "api ouvindo");
 
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown::signal())
-        .await
-        .map_err(AppError::internal)?;
+    axum::serve(
+        listener,
+        router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown::signal())
+    .await
+    .map_err(AppError::internal)?;
 
     tracing::info!("api encerrada com sucesso");
     Ok(())

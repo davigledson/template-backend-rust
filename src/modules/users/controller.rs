@@ -80,6 +80,9 @@ async fn list(
     summary = "Cria um usuário",
     description = "Requer `users:write`. Não existe cadastro público.",
     request_body = CreateUserRequest,
+    params(
+        ("Idempotency-Key" = Option<String>, Header, description = "Repetir a mesma chave devolve a resposta original por 24 h (até 128 caracteres ASCII)."),
+    ),
     security(("bearer" = [])),
     responses(
         (status = 201, description = "Usuário criado", body = UserOut),

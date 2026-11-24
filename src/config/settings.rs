@@ -44,6 +44,7 @@ pub struct Settings {
     pub jwt: JwtSettings,
     pub mail: MailSettings,
     pub jobs: JobSettings,
+    pub rate_limit: RateLimitSettings,
     pub log: LogSettings,
     pub cors: CorsSettings,
 }
@@ -110,6 +111,15 @@ impl Settings {
         if self.redis.pool_size == 0 {
             problems.push("redis.pool_size deve ser maior que zero".to_owned());
         }
+        if self.rate_limit.login_account_attempts == 0 {
+            problems.push("rate_limit.login_account_attempts deve ser maior que zero".to_owned());
+        }
+        if self.rate_limit.login_ip_attempts == 0 {
+            problems.push("rate_limit.login_ip_attempts deve ser maior que zero".to_owned());
+        }
+        if self.rate_limit.login_window_secs == 0 {
+            problems.push("rate_limit.login_window_secs deve ser maior que zero".to_owned());
+        }
         if self.jwt.secret.len() < MIN_SECRET_LEN {
             problems.push(format!(
                 "jwt.secret deve ter ao menos {MIN_SECRET_LEN} caracteres (defina APP__JWT__SECRET)"
@@ -158,6 +168,7 @@ impl Default for Settings {
             jwt: JwtSettings::default(),
             mail: MailSettings::default(),
             jobs: JobSettings::default(),
+            rate_limit: RateLimitSettings::default(),
             log: LogSettings::default(),
             cors: CorsSettings::default(),
         }
@@ -173,6 +184,8 @@ pub struct ServerSettings {
     /// `0` deixa o Tokio escolher. Em servidor de 2 vCPU use `2`.
     pub worker_threads: usize,
     pub body_limit_mb: usize,
+    /// Confia em `X-Forwarded-For`/`X-Real-IP` (apenas atrás de proxy conhecido).
+    pub trust_proxy_headers: bool,
 }
 
 impl ServerSettings {
@@ -198,6 +211,7 @@ impl Default for ServerSettings {
             request_timeout_secs: 30,
             worker_threads: 0,
             body_limit_mb: 2,
+            trust_proxy_headers: false,
         }
     }
 }
@@ -240,27 +254,46 @@ impl Default for DatabaseSettings {
 #[serde(default)]
 pub struct RedisSettings {
     pub url: String,
-    pub ttl_secs: u64,
     pub pool_size: usize,
-}
-
-impl RedisSettings {
-    pub fn ttl(&self) -> Duration {
-        Duration::from_secs(self.ttl_secs)
-    }
 }
 
 impl Default for RedisSettings {
     fn default() -> Self {
         Self {
             url: "redis://localhost:56379".to_owned(),
-            ttl_secs: 300,
             pool_size: 8,
         }
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct RateLimitSettings {
+    /// Tentativas de login por conta dentro da janela.
+    pub login_account_attempts: u32,
+    /// Tentativas de login por IP dentro da janela.
+    pub login_ip_attempts: u32,
+    pub login_window_secs: u64,
+}
+
+impl RateLimitSettings {
+    pub fn window(&self) -> Duration {
+        Duration::from_secs(self.login_window_secs)
+    }
+}
+
+impl Default for RateLimitSettings {
+    fn default() -> Self {
+        Self {
+            login_account_attempts: 5,
+            login_ip_attempts: 20,
+            login_window_secs: 900,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
+#[serde(default)]
 pub struct JwtSettings {
     pub issuer: String,
     pub audience: String,

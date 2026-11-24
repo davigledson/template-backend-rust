@@ -116,4 +116,11 @@ mod tests {
         let components = openapi.components.expect("components");
         assert!(components.security_schemes.contains_key("bearer"));
     }
+
+    #[test]
+    fn snapshot_do_contrato() {
+        let (_, openapi) = build();
+        let value = serde_json::to_value(openapi).expect("documento serializável");
+        insta::assert_json_snapshot!("openapi", value);
+    }
 }

@@ -25,6 +25,8 @@ pub enum AppError {
     Conflict(String),
     #[error("{0}")]
     MethodNotAllowed(String),
+    #[error("muitas tentativas; tente novamente em {retry_after_secs}s")]
+    TooManyRequests { retry_after_secs: u64 },
     #[error("{0}")]
     Unavailable(String),
     #[error("erro de validação")]
@@ -67,6 +69,7 @@ impl AppError {
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::MethodNotAllowed(_) => StatusCode::METHOD_NOT_ALLOWED,
+            Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
             Self::Database(_)
@@ -89,6 +92,10 @@ impl IntoResponse for AppError {
             Self::NotFound(detail) => ("Recurso não encontrado", detail.clone()),
             Self::Conflict(detail) => ("Conflito", detail.clone()),
             Self::MethodNotAllowed(detail) => ("Método não permitido", detail.clone()),
+            Self::TooManyRequests { retry_after_secs } => (
+                "Muitas tentativas",
+                format!("Aguarde {retry_after_secs} segundos antes de tentar novamente."),
+            ),
             Self::Unavailable(detail) => ("Serviço indisponível", detail.clone()),
             Self::Validation(errors) => {
                 let mut problem = problemdetails::new(StatusCode::UNPROCESSABLE_ENTITY)
@@ -112,10 +119,20 @@ impl IntoResponse for AppError {
             }
         };
 
-        problemdetails::new(status)
+        let mut response = problemdetails::new(status)
             .with_title(title)
             .with_detail(detail)
-            .into_response()
+            .into_response();
+
+        if let Self::TooManyRequests { retry_after_secs } = &self
+            && let Ok(value) = axum::http::HeaderValue::from_str(&retry_after_secs.to_string())
+        {
+            response
+                .headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, value);
+        }
+
+        response
     }
 }
 

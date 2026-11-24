@@ -9,6 +9,8 @@ request_timeout_secs = 30
 # Deixe 0 para o Tokio decidir; no servidor de 2 vCPU use 2.
 worker_threads = 0
 body_limit_mb = 2
+# Só habilite atrás de um proxy que sobrescreve X-Forwarded-For.
+trust_proxy_headers = false
 
 [database]
 url = "postgres://app:app@localhost:55432/app"
@@ -20,7 +22,6 @@ sqlx_logging = false
 
 [redis]
 url = "redis://localhost:56379"
-ttl_secs = 300
 pool_size = 8
 
 [jwt]
@@ -36,6 +37,12 @@ provider = "log"
 from = "nao-responda@example.com"
 # URL do SMTP: APP__MAIL__SMTP_URL (ex.: smtps://user:senha@host:465).
 smtp_url = ""
+
+[rate_limit]
+# Janela fixa de 15 min para falhas de login.
+login_account_attempts = 5
+login_ip_attempts = 20
+login_window_secs = 900
 
 [jobs]
 enabled = true

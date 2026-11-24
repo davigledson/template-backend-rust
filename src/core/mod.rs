@@ -1,10 +1,13 @@
 pub mod auth;
 pub mod cache;
+pub mod client_ip;
 pub mod error;
 pub mod extract;
 pub mod health;
 pub mod http;
+pub mod idempotency;
 pub mod mail;
+pub mod metrics;
 pub mod openapi;
 pub mod response;
 pub mod shutdown;

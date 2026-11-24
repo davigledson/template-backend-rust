@@ -131,6 +131,46 @@ async fn fluxo_completo_de_usuarios() {
         .await;
     duplicate.assert_status(StatusCode::CONFLICT);
 
+    // --- idempotência ---
+    let payload = json!({
+        "name": "Idem",
+        "email": "idem@teste.local",
+        "password": "IdemSenha#2026"
+    });
+    let first = server
+        .post("/api/v1/users")
+        .add_header("authorization", bearer(&admin))
+        .add_header("idempotency-key", "idem-user-1")
+        .json(&payload)
+        .await;
+    first.assert_status(StatusCode::CREATED);
+    let first: Value = first.json();
+
+    let replay = server
+        .post("/api/v1/users")
+        .add_header("authorization", bearer(&admin))
+        .add_header("idempotency-key", "idem-user-1")
+        .json(&payload)
+        .await;
+    replay.assert_status(StatusCode::CREATED);
+    let replay: Value = replay.json();
+    assert_eq!(first["id"], replay["id"]);
+
+    let idem_page: Value = server
+        .get("/api/v1/users?search=idem@teste.local")
+        .add_header("authorization", bearer(&admin))
+        .await
+        .json();
+    assert_eq!(idem_page["total"], 1, "a repetição não pode duplicar");
+
+    let invalid_key = server
+        .post("/api/v1/users")
+        .add_header("authorization", bearer(&admin))
+        .add_header("idempotency-key", "com espaco")
+        .json(&payload)
+        .await;
+    invalid_key.assert_status(StatusCode::BAD_REQUEST);
+
     let invalid = server
         .post("/api/v1/users")
         .add_header("authorization", bearer(&admin))
@@ -339,6 +379,92 @@ async fn fluxo_completo_de_usuarios() {
         .json(&json!({ "email": "ana@teste.local", "password": "SenhaFinal#2026" }))
         .await;
     final_login.assert_status_ok();
+    let final_session: Value = final_login.json();
+    let final_access = final_session["accessToken"]
+        .as_str()
+        .expect("access final")
+        .to_owned();
+    let first_refresh = final_session["refreshToken"]
+        .as_str()
+        .expect("refresh inicial")
+        .to_owned();
+
+    // --- rotação e detecção de reuso de refresh token ---
+    let rotated = server
+        .post("/api/v1/auth/refresh")
+        .json(&json!({ "refreshToken": first_refresh }))
+        .await;
+    rotated.assert_status_ok();
+    let rotated: Value = rotated.json();
+    let second_refresh = rotated["refreshToken"]
+        .as_str()
+        .expect("refresh rotacionado")
+        .to_owned();
+    assert_ne!(first_refresh, second_refresh);
+
+    let reuse = server
+        .post("/api/v1/auth/refresh")
+        .json(&json!({ "refreshToken": first_refresh }))
+        .await;
+    reuse.assert_status(StatusCode::UNAUTHORIZED);
+
+    // O reuso revoga a família inteira: o token rotacionado também cai.
+    let family_revoked = server
+        .post("/api/v1/auth/refresh")
+        .json(&json!({ "refreshToken": second_refresh }))
+        .await;
+    family_revoked.assert_status(StatusCode::UNAUTHORIZED);
+
+    // O access token segue válido até expirar (JWT stateless).
+    let access_still_valid = server
+        .get("/api/v1/auth/me")
+        .add_header("authorization", bearer(&final_access))
+        .await;
+    access_still_valid.assert_status_ok();
+
+    // Uma família nova, de outro login, não é afetada.
+    let other_session = server
+        .post("/api/v1/auth/login")
+        .json(&json!({ "email": "ana@teste.local", "password": "SenhaFinal#2026" }))
+        .await;
+    other_session.assert_status_ok();
+    let other_refresh: Value = other_session.json();
+    let other_refresh = other_refresh["refreshToken"]
+        .as_str()
+        .expect("refresh da outra sessão")
+        .to_owned();
+    let other_rotated = server
+        .post("/api/v1/auth/refresh")
+        .json(&json!({ "refreshToken": other_refresh }))
+        .await;
+    other_rotated.assert_status_ok();
+
+    // --- rate limit de login ---
+    for _ in 0..5 {
+        let failure = server
+            .post("/api/v1/auth/login")
+            .json(&json!({
+                "email": "rate.limit@teste.local",
+                "password": "SenhaErrada#2026"
+            }))
+            .await;
+        failure.assert_status(StatusCode::UNAUTHORIZED);
+    }
+
+    let blocked = server
+        .post("/api/v1/auth/login")
+        .json(&json!({
+            "email": "rate.limit@teste.local",
+            "password": "SenhaErrada#2026"
+        }))
+        .await;
+    blocked.assert_status(StatusCode::TOO_MANY_REQUESTS);
+    assert!(blocked.headers().get("retry-after").is_some());
+    assert!(
+        blocked
+            .content_type()
+            .starts_with("application/problem+json")
+    );
 
     // --- proteções do próprio admin ---
     let admin_me: Value = server
@@ -367,14 +493,14 @@ async fn fluxo_completo_de_usuarios() {
         .count(&db_check)
         .await
         .expect("contagem do outbox");
-    assert_eq!(pending, 4, "admin + ana + reset + troca própria");
+    assert_eq!(pending, 5, "admin + ana + idem + reset + troca própria");
 
     let recording = RecordingMailer::default();
     let summary = email_service::process_pending(&db_check, &recording, 10)
         .await
         .expect("processar outbox");
-    assert_eq!(summary.claimed, 4);
-    assert_eq!(summary.sent, 4);
+    assert_eq!(summary.claimed, 5);
+    assert_eq!(summary.sent, 5);
     assert_eq!(summary.failed, 0);
 
     let subjects: Vec<String> = recording
@@ -389,7 +515,7 @@ async fn fluxo_completo_de_usuarios() {
             .iter()
             .filter(|subject| *subject == "Sua conta foi criada")
             .count(),
-        2
+        3
     );
     assert_eq!(
         subjects
@@ -404,7 +530,7 @@ async fn fluxo_completo_de_usuarios() {
         .count(&db_check)
         .await
         .expect("enviados");
-    assert_eq!(sent, 4);
+    assert_eq!(sent, 5);
 
     // Deduplicação pelo dedupe_key.
     let message = EmailMessage {
@@ -453,6 +579,12 @@ async fn fluxo_completo_de_usuarios() {
     let docs = server.get("/docs").await;
     docs.assert_status_ok();
     assert!(docs.text().contains("Scalar"));
+
+    // --- métricas ---
+    let metrics = server.get("/metrics").await;
+    metrics.assert_status_ok();
+    let metrics = metrics.text();
+    assert!(metrics.contains("axum_http_requests_total"), "{metrics}");
 }
 
 fn bearer(token: &str) -> String {
