@@ -165,7 +165,7 @@ Quatro camadas transversais, cada uma com um custo e uma decisão:
 |---|---|---|
 | IP do cliente | `core/client_ip.rs` | só confia em `X-Forwarded-For` com `server.trust_proxy_headers = true` |
 | Rate limit | `core/auth/rate_limit.rs` | janela fixa no Redis, por conta e IP; fail-open |
-| Idempotência | `core/idempotency.rs` | obrigatória em `POST` de recurso; resposta 24 h; lock 60 s |
+| Idempotência | `core/idempotency/` | obrigatória em `POST` de recurso; resposta 24 h; lock 60 s |
 | Métricas | `core/metrics.rs` | recorder global via `OnceLock`; `/metrics` fora da medição |
 
 O rate limit é aplicado no service de login, depois da validação do corpo e
@@ -231,7 +231,7 @@ pode receber o mesmo e-mail duas vezes se o worker cair entre o envio e o
 `UPDATE`. O envio é idempotente por natureza para convite/reset.
 
 O worker só roda quando `jobs.enabled = true`; ele não sobe HTTP nem valida o
-segredo JWT. `Mailer` (`core/mail.rs`) tem duas implementações:
+segredo JWT. `Mailer` (`core/mail/`) tem duas implementações:
 
 | Provider | Uso | Comportamento |
 |---|---|---|

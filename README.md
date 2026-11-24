@@ -289,8 +289,8 @@ src/
 │   ├── client_ip.rs        # IP do cliente + confiança no proxy
 │   ├── error.rs            # AppError → Problem Details
 │   ├── extract.rs          # ValidatedJson / ValidatedQuery
-│   ├── idempotency.rs      # Idempotency-Key + replay no Redis
-│   ├── mail.rs             # trait Mailer: log e smtp
+│   ├── idempotency/        # Idempotency-Key + replay no Redis (key, store)
+│   ├── mail/               # trait Mailer: log e smtp
 │   ├── metrics.rs          # recorder Prometheus (OnceLock)
 │   ├── openapi.rs          # schema do Problem
 │   ├── response.rs         # Page<T> / PageQuery

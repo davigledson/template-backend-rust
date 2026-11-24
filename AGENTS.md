@@ -140,7 +140,7 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 - `modules/email` é dono de `email_outbox`; outro módulo chama
   `email::service::enqueue` **dentro da sua transação**, nunca envia direto.
 - `dedupe_key` é única por evento (`user-created:<id>`); repetir não duplica.
-- Envio fica atrás da trait `Mailer` em `core/mail.rs`: `log` (dev) ou `smtp`.
+- Envio fica atrás da trait `Mailer` em `core/mail/`: `log` (dev) ou `smtp`.
   Nunca logar corpo nem endereço completo no provider `log`.
 - O worker (`src/jobs/`) só roda com `jobs.enabled = true`; job novo entra em
   `jobs::run`, com duração logada e sem segurar o tick.
