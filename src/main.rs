@@ -1,0 +1,22 @@
+//! Binário da API HTTP.
+//!
+//! Fase 0: apenas inicializa o tracing. O servidor Axum entra na Fase 1.
+
+use std::process::ExitCode;
+
+use tracing_subscriber::{EnvFilter, fmt};
+
+fn init_tracing() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    fmt().with_env_filter(filter).with_target(true).init();
+}
+
+fn main() -> ExitCode {
+    init_tracing();
+    tracing::info!(
+        app = template_backend_rust::APP_NAME,
+        version = template_backend_rust::APP_VERSION,
+        "api iniciada em modo esqueleto (fase 0)"
+    );
+    ExitCode::SUCCESS
+}

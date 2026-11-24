@@ -1,0 +1,47 @@
+# Configuração base — valores padrão, seguros para versionar.
+# Precedência: APP__* (env) > config/<perfil>.toml > este arquivo > defaults do struct.
+# Segredos NUNCA entram aqui: use APP__JWT__SECRET no ambiente/.env.
+
+[server]
+host = "0.0.0.0"
+port = 8080
+request_timeout_secs = 30
+# Deixe 0 para o Tokio decidir; no servidor de 2 vCPU use 2.
+worker_threads = 0
+body_limit_mb = 2
+
+[database]
+url = "postgres://app:app@localhost:55432/app"
+max_connections = 8
+min_connections = 1
+acquire_timeout_secs = 5
+connect_timeout_secs = 5
+sqlx_logging = false
+
+[redis]
+url = "redis://localhost:56379"
+ttl_secs = 300
+pool_size = 8
+
+[jwt]
+issuer = "template-api"
+audience = "template-front"
+access_ttl_min = 15
+refresh_ttl_days = 7
+# secret vem de APP__JWT__SECRET (mínimo 32 caracteres), validado no boot.
+
+[jobs]
+enabled = true
+timezone = "America/Sao_Paulo"
+
+[log]
+level = "info"
+format = "json"
+ansi = false
+
+[cors]
+# Em desenvolvimento o perfil adiciona origens locais.
+allowed_origins = []
+allowed_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+allowed_headers = ["authorization", "content-type", "idempotency-key", "x-request-id"]
+max_age_secs = 3600

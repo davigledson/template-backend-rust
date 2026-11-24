@@ -1,0 +1,16 @@
+# Perfil de produção: logs em JSON, sem ANSI, sem origens locais.
+# Segredos e URLs vêm do ambiente (APP__*), nunca deste arquivo.
+
+[log]
+level = "info"
+format = "json"
+ansi = false
+
+[cors]
+allowed_origins = []
+
+[server]
+body_limit_mb = 1
+
+[database]
+sqlx_logging = false

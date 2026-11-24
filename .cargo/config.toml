@@ -1,0 +1,7 @@
+# Linker mais rápido no Linux (lld já vem com o rustup).
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+# Cache de compilação: instale o sccache e exporte no shell.
+#   export RUSTC_WRAPPER=sccache
+# Não fixamos aqui para não quebrar quem não tem a ferramenta.

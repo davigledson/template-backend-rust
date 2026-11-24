@@ -1,0 +1,16 @@
+# Perfil de desenvolvimento: logs legíveis e CORS liberado para o front local.
+
+[log]
+level = "debug"
+format = "pretty"
+ansi = true
+
+[cors]
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "http://localhost:4173",
+]
+
+[database]
+sqlx_logging = false
