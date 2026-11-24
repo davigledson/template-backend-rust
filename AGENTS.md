@@ -32,6 +32,7 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just migrate` | aplica migrations pendentes |
 | `just dev` | API em `http://localhost:8080` |
 | `just worker` | worker de cron |
+| `just mail-up` / `just mail-down` | Mailpit local (SMTP 1025, UI 8025) |
 | `just test` | testes com `cargo nextest` |
 | `just fmt` / `just lint` / `just check` | qualidade |
 | `just entities` | gera entidades a partir do banco |
@@ -258,6 +259,9 @@ Se não couber em uma pasta, o módulo está grande demais.
 - Redis é cache/fila de estado com `allkeys-lru` e sem AOF: **não** use como
   transporte durável de e-mail.
 - `just worker` só processa algo com `jobs.enabled = true` e infra no ar.
+- Para testar e-mail de verdade no dev: `just mail-up`, provider `smtp` em
+  `smtp://127.0.0.1:1025` e UI em `http://localhost:8025`. Mailpit é só local;
+  em produção use `smtps://` de um provedor real.
 - O recorder Prometheus é global e instalado uma vez (`core::metrics`); não chame
   `PrometheusMetricLayer::pair()` direto em teste.
 - Idempotência usa lock de 60 s e resposta de 24 h; o `Idempotency-Key` entra no

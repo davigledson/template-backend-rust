@@ -132,6 +132,9 @@ O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
   ambiente.
 - O worker entrega at-least-once: não use e-mail como confirmação única de
   operação financeira sem chave de idempotência no provedor.
+- Mailpit é apenas local (`127.0.0.1:1025/8025`), sem TLS nem autenticação, e
+  não deve ser exposto nem usado em produção. Em produção, `smtps://` com
+  credencial só no ambiente.
 
 ## Superfície HTTP
 

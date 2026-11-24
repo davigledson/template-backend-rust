@@ -153,6 +153,20 @@ Fluxo completo de auth: login → `me` → refresh (token antigo deve dar 401) �
 logout → refresh (401). Nunca deixe o servidor em foreground no chat; pare o
 processo ao terminar.
 
+Para validar e-mail de ponta a ponta no dev:
+
+```bash
+just mail-up
+APP__MAIL__PROVIDER=smtp APP__MAIL__SMTP_URL=smtp://127.0.0.1:1025 just worker
+
+# UI: http://localhost:8025
+# API do Mailpit: http://localhost:8025/api/v1/messages
+```
+
+Crie um usuário pela API, rode o worker e confira destinatário e assunto no
+Mailpit. O teste de integração continua com `RecordingMailer`; Mailpit é para
+smoke manual e inspeção visual.
+
 ## CI
 
 ```bash

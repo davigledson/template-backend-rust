@@ -59,6 +59,7 @@ just dev                      # API em http://localhost:8080
 | `just up` / `just down` / `just reset` | infra (reset apaga volumes) |
 | `just dev` | API com logs legíveis |
 | `just worker` | entrega do outbox de e-mail e limpeza (cron) |
+| `just mail-up` / `just mail-down` | Mailpit local: SMTP 1025 e UI 8025 |
 | `just migrate` | migrations pendentes |
 | `just admin-create <email> "<nome>" [true]` | cria o primeiro admin (ou outro com `true`) |
 | `just admin-promote <email>` | promove usuário existente a admin |
@@ -93,6 +94,27 @@ E-mail:
 
 Em desenvolvimento use `log`; a senha do SMTP fica só no ambiente
 (`APP__MAIL__SMTP_URL`) e é redigida no `Debug` da configuração.
+
+### E-mail local com Mailpit
+
+Para ver o e-mail de verdade sem enviar para fora:
+
+```bash
+just mail-up
+
+# .env
+APP__MAIL__PROVIDER=smtp
+APP__MAIL__SMTP_URL=smtp://127.0.0.1:1025
+APP__MAIL__FROM=nao-responda@teste.local
+```
+
+Rode `just worker` para entregar o outbox e abra `http://localhost:8025`.
+O Mailpit recebe qualquer destinatário, sem autenticação e sem TLS, e escuta
+só em `127.0.0.1`. Com a API dentro do compose, use `smtp://mailpit:1025`.
+Se as portas padrão estiverem ocupadas, defina `MAILPIT_SMTP_PORT` e
+`MAILPIT_UI_PORT` no `.env` (o compose e o `just mail-up` respeitam).
+Em produção o `mail.provider` continua `smtp` com `smtps://...` de um provedor
+real; Mailpit não vai para produção.
 
 Rate limit e proxy:
 

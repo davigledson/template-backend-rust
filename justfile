@@ -50,6 +50,15 @@ dev:
 worker:
     cargo run --bin worker
 
+# Sobe o Mailpit para testar e-mail local (SMTP 1025, UI 8025).
+mail-up:
+    docker compose --profile mail up -d mailpit
+    @echo "Mailpit: http://localhost:${MAILPIT_UI_PORT:-8025} (SMTP em localhost:${MAILPIT_SMTP_PORT:-1025})"
+
+# Para o Mailpit (mantém o container para reiniciar depois).
+mail-down:
+    docker compose --profile mail stop mailpit
+
 # Aplica as migrations pendentes.
 migrate:
     cargo run --bin migrator

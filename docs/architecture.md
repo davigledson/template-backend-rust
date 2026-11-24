@@ -234,6 +234,11 @@ segredo JWT. `Mailer` (`core/mail.rs`) tem duas implementações:
 
 O endereço completo nunca vai para o log no provider `log`.
 
+No desenvolvimento, `just mail-up` sobe o Mailpit (SMTP `1025`, UI `8025`) e o
+provider `smtp` aponta para `smtp://127.0.0.1:1025`. Assim o caminho real
+(outbox → worker → SMTP) é exercitado sem enviar nada para fora. Mailpit escuta
+só em `127.0.0.1` e não existe no deploy de produção.
+
 ## Por que não Keycloak
 
 O alvo é um template de projeto novo, com um domínio de usuários simples

@@ -54,6 +54,16 @@ services:
       timeout: 3s
       retries: 12
 
+  # E-mail local: recebe todo SMTP e mostra em http://localhost:8025.
+  # Ative com: docker compose --profile mail up -d mailpit
+  mailpit:
+    image: axllent/mailpit:v1.34.0
+    profiles: ["mail"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+
   # Aplicação e worker usam a mesma imagem; ative com:
   #   docker compose --profile app up -d
   api:
