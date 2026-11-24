@@ -1,8 +1,10 @@
-//! CLI de bootstrap: cria o primeiro admin, promove usuários e redefine senha.
+//! CLI de manutenção: bootstrap de admin e operação do outbox de e-mail.
 //!
 //! Nunca roda no boot da API. Exemplos:
 //!   cargo run --bin admin -- create --email admin@empresa.com --name "Admin"
 //!   ADMIN_PASSWORD=... cargo run --bin admin -- create --email ... --name ...
+//!   cargo run --bin admin -- outbox list --status failed
+//!   cargo run --bin admin -- outbox retry <id>
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -13,9 +15,14 @@ use sea_orm::DatabaseConnection;
 use template_backend_rust::{
     config::Settings,
     core::auth::{password::MIN_PASSWORD_LEN, role::Role},
+    core::mail::mask_email,
     database::connection,
-    modules::users::service::{self, NewUser},
+    modules::{
+        email::service as email_service,
+        users::service::{self, NewUser},
+    },
 };
+use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(name = "admin", about = "Bootstrap e manutenção de usuários")]
@@ -46,6 +53,32 @@ enum Command {
         #[arg(long)]
         email: String,
     },
+    /// Inspeciona e reprocessa o outbox de e-mail.
+    Outbox {
+        #[command(subcommand)]
+        action: OutboxCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum OutboxCommand {
+    /// Lista itens de um status (`pending`, `failed` ou `sent`).
+    List {
+        #[arg(long, default_value = "failed")]
+        status: String,
+        #[arg(long, default_value_t = 20)]
+        limit: u64,
+    },
+    /// Devolve um item `pending`/`failed` ao processamento imediato.
+    Retry { id: Uuid },
+    /// Reprocessa todos os itens de um status (`pending` ou `failed`).
+    RetryAll {
+        #[arg(long, default_value = "failed")]
+        status: String,
+        /// Zera o contador de tentativas antes de reagendar.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[tokio::main]
@@ -68,6 +101,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         Command::Create { email, name, force } => create_admin(&db, &email, &name, force).await?,
         Command::Promote { email } => promote(&db, &email).await?,
         Command::ResetPassword { email } => reset_password(&db, &email).await?,
+        Command::Outbox { action } => outbox(&db, action).await?,
     }
 
     Ok(())
@@ -128,6 +162,55 @@ async fn reset_password(
     let password = read_password(true)?;
     service::set_password(db, user.id, &password).await?;
     println!("senha redefinida para {}", user.email);
+    Ok(())
+}
+
+async fn outbox(
+    db: &DatabaseConnection,
+    action: OutboxCommand,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match action {
+        OutboxCommand::List { status, limit } => {
+            let limit = limit.clamp(1, 200);
+            let items = email_service::list(db, &status, limit).await?;
+
+            if items.is_empty() {
+                println!("nenhum e-mail com status {status}");
+                return Ok(());
+            }
+
+            println!(
+                "{:<38} {:<10} {:>3} {:<30} assunto",
+                "id", "status", "tent", "destinatário"
+            );
+            for item in items {
+                println!(
+                    "{:<38} {:<10} {:>3} {:<30} {}",
+                    item.id,
+                    item.status,
+                    item.attempts,
+                    mask_email(&item.to_email),
+                    item.subject
+                );
+            }
+        }
+        OutboxCommand::Retry { id } => {
+            if email_service::retry(db, id).await? {
+                println!("reagendado: {id}");
+            } else {
+                return Err("item não encontrado ou já enviado".into());
+            }
+        }
+        OutboxCommand::RetryAll { status, force } => {
+            if !matches!(status.as_str(), "pending" | "failed") {
+                return Err("status aceito: pending ou failed".into());
+            }
+
+            let total = email_service::retry_all(db, &status, force).await?;
+            println!("reagendados: {total} item(ns) de status {status}");
+        }
+    }
+
     Ok(())
 }
 

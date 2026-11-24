@@ -75,6 +75,18 @@ admin-promote email:
 admin-reset-password email:
     cargo run --quiet --bin admin -- reset-password --email {{email}}
 
+# Lista e-mails do outbox por status (pending, failed ou sent).
+outbox-list status="failed" limit="20":
+    cargo run --quiet --bin admin -- outbox list --status {{status}} --limit {{limit}}
+
+# Devolve um e-mail do outbox ao processamento imediato.
+outbox-retry id:
+    cargo run --quiet --bin admin -- outbox retry {{id}}
+
+# Reprocessa todos os e-mails de um status; force="true" zera as tentativas.
+outbox-retry-all status="failed" force="false":
+    cargo run --quiet --bin admin -- outbox retry-all --status {{status}} {{ if force == "true" { "--force" } else { "" } }}
+
 # Verifica o build de todos os alvos.
 check:
     cargo check --all-targets --all-features
