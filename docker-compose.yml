@@ -4,6 +4,9 @@ services:
   postgres:
     image: postgres:18-alpine
     restart: unless-stopped
+    # Orçamento de 2 vCPU / 2 GB: o Postgres fica com a maior fatia.
+    mem_limit: 768m
+    cpus: 1.0
     environment:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app
@@ -36,6 +39,9 @@ services:
   redis:
     image: redis:8-alpine
     restart: unless-stopped
+    # `maxmemory 128mb` + folga do processo.
+    mem_limit: 160m
+    cpus: 0.5
     command:
       - redis-server
       - --maxmemory
@@ -60,6 +66,8 @@ services:
     image: axllent/mailpit:v1.34.0
     profiles: ["mail"]
     restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.2
     ports:
       - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
       - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
@@ -70,6 +78,8 @@ services:
     profiles: ["app"]
     build: .
     command: ["api"]
+    mem_limit: 384m
+    cpus: 0.9
     environment:
       APP_PROFILE: production
       APP__DATABASE__URL: postgres://app:app@postgres:5432/app
@@ -92,6 +102,8 @@ services:
     profiles: ["app"]
     build: .
     command: ["worker"]
+    mem_limit: 256m
+    cpus: 0.5
     environment:
       APP_PROFILE: production
       APP__DATABASE__URL: postgres://app:app@postgres:5432/app
@@ -112,6 +124,8 @@ services:
     profiles: ["tools"]
     build: .
     command: ["migrator"]
+    mem_limit: 384m
+    cpus: 0.5
     environment:
       APP_PROFILE: production
       APP__DATABASE__URL: postgres://app:app@postgres:5432/app
