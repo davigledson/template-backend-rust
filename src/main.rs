@@ -7,7 +7,9 @@ use std::{process::ExitCode, sync::Arc};
 use template_backend_rust::{
     app,
     config::Settings,
-    core::{cache::Cache, error::AppError, shutdown, state::AppState, telemetry},
+    core::{
+        auth::jwt::JwtService, cache::Cache, error::AppError, shutdown, state::AppState, telemetry,
+    },
     database::connection,
 };
 use tokio::net::TcpListener;
@@ -63,7 +65,8 @@ async fn run(settings: Settings) -> Result<(), AppError> {
 
     let db = connection::connect(&config.database).await?;
     let cache = Cache::connect(&config.redis)?;
-    let state = AppState::new(db, cache, Arc::clone(&config));
+    let jwt = JwtService::new(&config.jwt)?;
+    let state = AppState::new(db, cache, jwt, Arc::clone(&config));
     let router = app::build(state);
 
     let address = format!("{}:{}", config.server.host, config.server.port);

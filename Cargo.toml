@@ -82,8 +82,13 @@ deadpool-redis = { version = "0.23.1", features = ["rt_tokio_1", "tokio-comp"] }
 redis = "1.8.3"
 
 # --- auth ---
-jsonwebtoken = "12.0.0"
+jsonwebtoken = { version = "12.0.0", features = ["rust_crypto"] }
 argon2 = "0.6.0"
+sha2 = "0.11.1"
+
+# --- CLI ---
+clap = { version = "4.6.9", features = ["derive"] }
+rpassword = "7.5.5"
 
 # --- cron ---
 tokio-cron-scheduler = "0.15.1"

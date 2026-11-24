@@ -11,6 +11,8 @@ pub mod app;
 pub mod config;
 pub mod core;
 pub mod database;
+pub mod migrations;
+pub mod modules;
 pub mod routes;
 
 pub const APP_NAME: &str = env!("CARGO_PKG_NAME");

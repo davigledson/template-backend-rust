@@ -2,14 +2,17 @@
 
 use axum::Router;
 
-use crate::core::{error::AppError, health, state::AppState};
+use crate::{
+    core::{error::AppError, health, state::AppState},
+    modules,
+};
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .merge(health::router())
+        .nest("/api/v1", modules::router())
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
-    // Fase 4+: .nest("/api/v1", modules::router())
 }
 
 async fn not_found() -> AppError {

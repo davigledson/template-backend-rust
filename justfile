@@ -54,6 +54,18 @@ worker:
 migrate:
     cargo run --bin migrator
 
+# Cria um administrador (o primeiro do banco, ou outro com --force).
+admin-create email name force="false":
+    cargo run --quiet --bin admin -- create --email {{email}} --name "{{name}}" {{ if force == "true" { "--force" } else { "" } }}
+
+# Promove um usuário existente a administrador.
+admin-promote email:
+    cargo run --quiet --bin admin -- promote --email {{email}}
+
+# Redefine a senha de um usuário (invalida as sessões).
+admin-reset-password email:
+    cargo run --quiet --bin admin -- reset-password --email {{email}}
+
 # Verifica o build de todos os alvos.
 check:
     cargo check --all-targets --all-features
@@ -80,7 +92,7 @@ test-verbose:
 
 # Gera as entidades SeaORM a partir do banco atual.
 entities:
-    sea-orm-cli generate entity \
+    PATH="$HOME/.cargo/bin:$PATH" sea-orm-cli generate entity \
         --database-url "{{db_url}}" \
         --output-dir src/database/entity \
         --with-serde both \

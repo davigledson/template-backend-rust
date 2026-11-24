@@ -50,6 +50,16 @@ pub struct Settings {
 impl Settings {
     /// Carrega `default.toml`, o perfil ativo e os overrides `APP__*`.
     pub fn load() -> Result<Self, SettingsError> {
+        let settings = Self::load_unvalidated()?;
+        settings.validate()?;
+        Ok(settings)
+    }
+
+    /// Carrega sem validar invariantes.
+    ///
+    /// Usado por migrations e CLI que só precisam do banco. A API e o worker
+    /// sempre usam [`Settings::load`].
+    pub fn load_unvalidated() -> Result<Self, SettingsError> {
         let profile = std::env::var("APP_PROFILE").unwrap_or_else(|_| DEFAULT_PROFILE.to_owned());
 
         if profile == DEFAULT_PROFILE {
@@ -68,7 +78,6 @@ impl Settings {
             .extract()?;
 
         settings.profile = profile;
-        settings.validate()?;
         Ok(settings)
     }
 

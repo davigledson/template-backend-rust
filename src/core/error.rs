@@ -33,8 +33,24 @@ pub enum AppError {
     Database(#[from] sea_orm::DbErr),
     #[error(transparent)]
     Cache(#[from] crate::core::cache::CacheError),
+    #[error(transparent)]
+    Password(#[from] crate::core::auth::password::PasswordError),
+    #[error(transparent)]
+    Token(#[from] crate::core::auth::jwt::JwtError),
     #[error("erro interno: {0}")]
     Internal(String),
+}
+
+impl From<deadpool_redis::PoolError> for AppError {
+    fn from(error: deadpool_redis::PoolError) -> Self {
+        Self::Cache(crate::core::cache::CacheError::Pool(error))
+    }
+}
+
+impl From<redis::RedisError> for AppError {
+    fn from(error: redis::RedisError) -> Self {
+        Self::Cache(crate::core::cache::CacheError::Redis(error))
+    }
 }
 
 impl AppError {
@@ -53,9 +69,11 @@ impl AppError {
             Self::MethodNotAllowed(_) => StatusCode::METHOD_NOT_ALLOWED,
             Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
-            Self::Database(_) | Self::Cache(_) | Self::Internal(_) => {
-                StatusCode::INTERNAL_SERVER_ERROR
-            }
+            Self::Database(_)
+            | Self::Cache(_)
+            | Self::Password(_)
+            | Self::Token(_)
+            | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
@@ -81,7 +99,11 @@ impl IntoResponse for AppError {
                 }
                 return problem.into_response();
             }
-            Self::Database(_) | Self::Cache(_) | Self::Internal(_) => {
+            Self::Database(_)
+            | Self::Cache(_)
+            | Self::Password(_)
+            | Self::Token(_)
+            | Self::Internal(_) => {
                 tracing::error!(error = %self, "erro interno");
                 (
                     "Erro interno",
