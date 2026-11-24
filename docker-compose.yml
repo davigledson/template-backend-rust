@@ -54,41 +54,63 @@ services:
       timeout: 3s
       retries: 12
 
-  # A imagem da aplicação existe a partir da Fase 7 (Dockerfile).
-  # Descomente/ative com: docker compose --profile app up -d
-  # api:
-  #   profiles: ["app"]
-  #   build: .
-  #   command: ["./api"]
-  #   env_file: .env
-  #   environment:
-  #     APP_PROFILE: production
-  #     APP__DATABASE__URL: postgres://app:app@postgres:5432/app
-  #     APP__REDIS__URL: redis://redis:6379
-  #   ports:
-  #     - "8080:8080"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   restart: unless-stopped
-  #
-  # worker:
-  #   profiles: ["app"]
-  #   build: .
-  #   command: ["./worker"]
-  #   env_file: .env
-  #   environment:
-  #     APP_PROFILE: production
-  #     APP__DATABASE__URL: postgres://app:app@postgres:5432/app
-  #     APP__REDIS__URL: redis://redis:6379
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   restart: unless-stopped
+  # Aplicação e worker usam a mesma imagem; ative com:
+  #   docker compose --profile app up -d
+  api:
+    profiles: ["app"]
+    build: .
+    command: ["api"]
+    environment:
+      APP_PROFILE: production
+      APP__DATABASE__URL: postgres://app:app@postgres:5432/app
+      APP__REDIS__URL: redis://redis:6379
+      APP__JWT__SECRET: ${APP__JWT__SECRET:-}
+      APP__MAIL__PROVIDER: ${APP__MAIL__PROVIDER:-log}
+      APP__MAIL__FROM: ${APP__MAIL__FROM:-nao-responda@example.com}
+      APP__MAIL__SMTP_URL: ${APP__MAIL__SMTP_URL:-}
+      APP__SERVER__TRUST_PROXY_HEADERS: ${APP__SERVER__TRUST_PROXY_HEADERS:-false}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    profiles: ["app"]
+    build: .
+    command: ["worker"]
+    environment:
+      APP_PROFILE: production
+      APP__DATABASE__URL: postgres://app:app@postgres:5432/app
+      APP__REDIS__URL: redis://redis:6379
+      APP__JWT__SECRET: ${APP__JWT__SECRET:-}
+      APP__MAIL__PROVIDER: ${APP__MAIL__PROVIDER:-log}
+      APP__MAIL__FROM: ${APP__MAIL__FROM:-nao-responda@example.com}
+      APP__MAIL__SMTP_URL: ${APP__MAIL__SMTP_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Migrations são explícitas: docker compose --profile tools run --rm migrate
+  migrate:
+    profiles: ["tools"]
+    build: .
+    command: ["migrator"]
+    environment:
+      APP_PROFILE: production
+      APP__DATABASE__URL: postgres://app:app@postgres:5432/app
+      APP__REDIS__URL: redis://redis:6379
+      APP__JWT__SECRET: ${APP__JWT__SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
 volumes:
   pgdata:

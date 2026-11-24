@@ -99,9 +99,17 @@ entities:
         --with-prelude none \
         --date-time-crate chrono
 
-# Verifica o snapshot do OpenAPI (fase 7).
+# Verifica o snapshot do OpenAPI (falha se o contrato mudar sem aceite).
 openapi-check:
-    cargo insta test --check
+    cargo test --lib routes::openapi
+
+# Verifica licenças, advisories e fontes das dependências.
+deny:
+    cargo deny check
+
+# Constrói a imagem de produção.
+docker-build:
+    docker build -t template-backend-rust:local .
 
 # Pipeline local equivalente ao CI.
-ci: fmt lint check test
+ci: fmt lint check test deny

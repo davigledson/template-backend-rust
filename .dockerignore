@@ -1,0 +1,15 @@
+target
+.git
+.gitignore
+.github
+.env
+.env.*
+!.env.example
+docs
+tests
+README.md
+AGENTS.md
+docker-compose.yml
+justfile
+deny.toml
+*.log
