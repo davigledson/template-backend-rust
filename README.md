@@ -14,6 +14,7 @@ módulos donos das suas rotas/regras/tabelas e um `core` fino de infraestrutura.
 > [adicionar módulo](docs/adding-a-module.md) ·
 > [segurança](docs/security.md) ·
 > [testes](docs/testing.md) ·
+> [operação](docs/operations.md) · [capacidade](docs/capacity.md) ·
 > [decisões](docs/decisions.md).
 
 ## Pré-requisitos (máquina do dev)
@@ -64,6 +65,9 @@ just dev                      # API em http://localhost:8080
 | `just admin-create <email> "<nome>" [true]` | cria o primeiro admin (ou outro com `true`) |
 | `just admin-promote <email>` | promove usuário existente a admin |
 | `just admin-reset-password <email>` | redefine a senha e invalida as sessões |
+| `just outbox-list [status] [limit]` | lista e-mails do outbox (padrão: `failed`, 20) |
+| `just outbox-retry <id>` | devolve um e-mail ao processamento imediato |
+| `just outbox-retry-all [status] [force]` | reprocessa todos de um status |
 | `just test` | testes unitários + integração |
 | `just fmt` / `just lint` / `just check` | qualidade |
 | `just openapi-check` | snapshot do contrato OpenAPI |
@@ -137,7 +141,7 @@ para o log. Só habilite `trust_proxy_headers` atrás de um proxy que sobrescrev
 | `GET /health/ready` | readiness: exige Postgres e Redis; devolve `503` se algum cair |
 | `GET /docs` | UI Scalar com todos os endpoints |
 | `GET /api-docs/openapi.json` | especificação OpenAPI 3 |
-| `GET /metrics` | métricas Prometheus (`axum_http_requests_*`) |
+| `GET /metrics` | Prometheus: `axum_http_requests_*` + domínio `app_*` (ver `docs/operations.md`) |
 
 Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
 `/metrics` não tem autenticação: restrinja no proxy ou na rede.
@@ -321,6 +325,8 @@ docs/                       # o "porquê" (AGENTS.md é o contrato)
 ├── adding-a-module.md
 ├── security.md
 ├── testing.md
+├── operations.md
+└── capacity.md
 └── decisions.md
 ```
 

@@ -187,7 +187,13 @@ um replay devolveria refresh já rotacionado, o que revogaria a família. A regr
 
 - Logs estruturados com `x-request-id`; 5xx genérico para o cliente.
 - `/metrics` expõe `axum_http_requests_total`, `..._duration_seconds` e
-  `..._pending` (axum-prometheus).
+  `..._pending` (axum-prometheus), mais as métricas de domínio `app_*`:
+  e-mail (fila e enviados em 24 h), login bloqueado/falho, reuso de refresh e
+  replay/conflito de idempotência. Nomes e labels vivem em `core/metrics.rs`;
+  os gauges de outbox são lidos do banco pela API a cada 30 s, porque o worker
+  não serve `/metrics`.
+- Spans de `login`, `refresh`, `logout`, criação/atualização de usuário e
+  processamento do outbox herdam o `x-request-id` do HTTP.
 - `worker` loga resumo e duração de cada job.
 - O endpoint de métricas não tem autenticação; restrinja na rede/proxy.
 

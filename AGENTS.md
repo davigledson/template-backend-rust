@@ -42,6 +42,9 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just admin-create <email> "<nome>" [true]` | cria admin (primeiro, ou outro com `true`) |
 | `just admin-promote <email>` | promove usuário a admin |
 | `just admin-reset-password <email>` | redefine senha e invalida sessões |
+| `just outbox-list [status] [limit]` | lista e-mails do outbox |
+| `just outbox-retry <id>` | reprocessa um e-mail na hora |
+| `just outbox-retry-all [status] [force]` | reprocessa todos de um status |
 | `just ci` | fmt + lint + check + test + deny |
 
 ## Mapa
@@ -305,4 +308,6 @@ Se não couber em uma pasta, o módulo está grande demais.
 - `docs/adding-a-module.md` — tutorial passo a passo.
 - `docs/security.md` — auth, e-mail, segredos e hardening.
 - `docs/testing.md` — estratégia de testes.
+- `docs/operations.md` — deploy, backup, outbox, métricas e incidentes.
+- `docs/capacity.md` — orçamento de 2 vCPU / 2 GB e quando crescer.
 - `docs/decisions.md` — registro de decisões (ADRs curtos).
