@@ -1,11 +1,12 @@
-//! Idempotência de `POST` com `Idempotency-Key`.
+//! Idempotência de `POST` de recurso com `Idempotency-Key`.
 //!
-//! A chave é opcional: sem o cabeçalho, a requisição segue normalmente. Com
-//! ele, a primeira execução grava a resposta no Redis por 24 h e as repetições
-//! devolvem exatamente a mesma resposta, sem repetir o efeito.
-//!
-//! - a assinatura inclui método, caminho e hash do `Authorization`, para uma
-//!   chave não vazar a resposta de outro usuário;
+//! - a chave é **obrigatória** em `POST` sob `/api/v1` (exceto `/api/v1/auth/`);
+//! - rotas de sessão ficam de fora: a resposta carrega tokens e um replay
+//!   devolveria um refresh já rotacionado, o que dispararia a detecção de reuso;
+//! - a assinatura inclui método, caminho, usuário (claim `sub` do access token)
+//!   e a chave, para uma chave não vazar a resposta de outro usuário;
+//! - a primeira execução grava a resposta por 24 h e as repetições devolvem
+//!   status, `content-type`, `location`, `etag` e corpo originais;
 //! - enquanto a primeira execução está em andamento, a chave vale "processing"
 //!   e uma repetição recebe `409`;
 //! - resposta `5xx` não é gravada: o cliente pode tentar de novo;
@@ -14,14 +15,17 @@
 use axum::{
     body::{Body, to_bytes},
     extract::{Request, State},
-    http::{Method, StatusCode, header::CONTENT_TYPE},
+    http::{
+        HeaderMap, HeaderName, HeaderValue, Method, StatusCode,
+        header::{AUTHORIZATION, CONTENT_TYPE, ETAG, LOCATION},
+    },
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::core::{cache::Cache, error::AppError, state::AppState};
+use crate::core::{auth::jwt::JwtService, cache::Cache, error::AppError, state::AppState};
 
 const PREFIX: &str = "idem:";
 const PROCESSING: &str = "processing";
@@ -29,17 +33,23 @@ const TTL_SECS: i64 = 24 * 60 * 60;
 const LOCK_SECS: i64 = 60;
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_KEY_LEN: usize = 128;
+const API_PREFIX: &str = "/api/v1/";
+const SESSION_PREFIX: &str = "/api/v1/auth/";
+
+/// Cabeçalhos de resposta preservados no replay. `date`, `content-length` e
+/// `set-cookie` ficam de fora: não fazem sentido fora da resposta original.
+const REPLAYED_HEADERS: [HeaderName; 3] = [CONTENT_TYPE, LOCATION, ETAG];
 
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredResponse {
     status: u16,
-    #[serde(rename = "contentType", skip_serializing_if = "Option::is_none")]
-    content_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    headers: Vec<(String, String)>,
     body: String,
 }
 
 pub async fn middleware(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    if request.method() != Method::POST {
+    if !requires_key(request.method(), request.uri().path()) {
         return next.run(request).await;
     }
 
@@ -49,7 +59,8 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
     else {
-        return next.run(request).await;
+        return AppError::BadRequest("Idempotency-Key é obrigatório em POST de recurso".to_owned())
+            .into_response();
     };
 
     if !valid_key(raw_key) {
@@ -62,23 +73,13 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
     let fingerprint = fingerprint(
         request.method().as_str(),
         request.uri().path(),
-        request
-            .headers()
-            .get("authorization")
-            .and_then(|value| value.to_str().ok()),
+        &subject(&state.jwt, request.headers()),
         raw_key,
     );
 
     let cache = &state.cache;
     match acquire(cache, &fingerprint).await {
-        Ok(Acquired::Replay(stored)) => {
-            return build_response(
-                StatusCode::from_u16(stored.status).unwrap_or(StatusCode::OK),
-                stored.content_type.as_deref(),
-                axum::body::Bytes::from(stored.body),
-            )
-            .unwrap_or_else(|_| internal_response());
-        }
+        Ok(Acquired::Replay(stored)) => return replay(stored),
         Ok(Acquired::Busy) => {
             return AppError::Conflict(
                 "já existe uma requisição em andamento com esta Idempotency-Key".to_owned(),
@@ -93,14 +94,10 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
     }
 
     let response = next.run(request).await;
-    let status = response.status();
-    let content_type = response
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
+    let (parts, body) = response.into_parts();
+    let status = parts.status;
 
-    let body = match to_bytes(response.into_body(), MAX_RESPONSE_BYTES).await {
+    let body = match to_bytes(body, MAX_RESPONSE_BYTES).await {
         Ok(body) => body,
         Err(error) => {
             tracing::error!(error = %error, "resposta grande demais para idempotência");
@@ -111,25 +108,57 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
 
     if status.is_server_error() {
         delete(cache, &fingerprint).await;
-    } else if let Ok(text) = String::from_utf8(body.to_vec()) {
-        let stored = StoredResponse {
-            status: status.as_u16(),
-            content_type: content_type.clone(),
-            body: text,
-        };
+    } else {
+        match String::from_utf8(body.to_vec()) {
+            Ok(text) => {
+                let stored = StoredResponse {
+                    status: status.as_u16(),
+                    headers: replayable_headers(&parts.headers),
+                    body: text,
+                };
 
-        if let Err(error) = save(cache, &fingerprint, &stored).await {
-            tracing::warn!(error = %error, "falha ao gravar a resposta idempotente");
+                if let Err(error) = save(cache, &fingerprint, &stored).await {
+                    tracing::warn!(error = %error, "falha ao gravar a resposta idempotente");
+                }
+            }
+            Err(_) => {
+                tracing::warn!("resposta não textual; não será reaproveitada");
+                delete(cache, &fingerprint).await;
+            }
         }
     }
 
-    build_response(status, content_type.as_deref(), body).unwrap_or_else(|_| internal_response())
+    Response::from_parts(parts, Body::from(body))
 }
 
 enum Acquired {
     Lock,
     Replay(StoredResponse),
     Busy,
+}
+
+/// `POST` de recurso exige a chave; rotas de sessão e demais métodos não.
+fn requires_key(method: &Method, path: &str) -> bool {
+    method == Method::POST && path.starts_with(API_PREFIX) && !path.starts_with(SESSION_PREFIX)
+}
+
+/// Identifica o usuário pelo `sub` do access token. Um token inválido cai no
+/// hash do cabeçalho: a rota vai responder `401`, mas as chaves não se misturam.
+fn subject(jwt: &JwtService, headers: &HeaderMap) -> String {
+    let authorization = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+
+    if let Some(token) = authorization.and_then(|value| value.strip_prefix("Bearer "))
+        && let Ok(claims) = jwt.decode(token)
+    {
+        return format!("user:{}", claims.sub);
+    }
+
+    match authorization {
+        Some(value) => format!("token:{}", hash(value)),
+        None => "anonymous".to_owned(),
+    }
 }
 
 async fn acquire(cache: &Cache, fingerprint: &str) -> Result<Acquired, AppError> {
@@ -196,9 +225,8 @@ fn key_for(fingerprint: &str) -> String {
     format!("{PREFIX}{fingerprint}")
 }
 
-fn fingerprint(method: &str, path: &str, authorization: Option<&str>, raw_key: &str) -> String {
-    let auth = authorization.unwrap_or("anonymous");
-    hash(&format!("{method}\n{path}\n{auth}\n{raw_key}"))
+fn fingerprint(method: &str, path: &str, subject: &str, raw_key: &str) -> String {
+    hash(&format!("{method}\n{path}\n{subject}\n{raw_key}"))
 }
 
 fn hash(value: &str) -> String {
@@ -215,16 +243,35 @@ fn valid_key(key: &str) -> bool {
     !key.is_empty() && key.len() <= MAX_KEY_LEN && key.chars().all(|c| c.is_ascii_graphic())
 }
 
-fn build_response(
-    status: StatusCode,
-    content_type: Option<&str>,
-    body: axum::body::Bytes,
-) -> Result<Response, axum::http::Error> {
+fn replayable_headers(headers: &HeaderMap) -> Vec<(String, String)> {
+    REPLAYED_HEADERS
+        .iter()
+        .filter_map(|name| {
+            headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .map(|value| (name.as_str().to_owned(), value.to_owned()))
+        })
+        .collect()
+}
+
+fn replay(stored: StoredResponse) -> Response {
+    let status = StatusCode::from_u16(stored.status).unwrap_or(StatusCode::OK);
     let mut builder = Response::builder().status(status);
-    if let Some(content_type) = content_type {
-        builder = builder.header(CONTENT_TYPE, content_type);
+
+    for (name, value) in &stored.headers {
+        let (Ok(name), Ok(value)) = (
+            HeaderName::from_bytes(name.as_bytes()),
+            HeaderValue::from_str(value),
+        ) else {
+            continue;
+        };
+        builder = builder.header(name, value);
     }
-    builder.body(Body::from(body))
+
+    builder
+        .body(Body::from(stored.body))
+        .unwrap_or_else(|_| internal_response())
 }
 
 fn internal_response() -> Response {
@@ -244,24 +291,41 @@ mod tests {
     }
 
     #[test]
+    fn chave_e_exigida_so_em_post_de_recurso() {
+        assert!(requires_key(&Method::POST, "/api/v1/users"));
+        assert!(!requires_key(&Method::POST, "/api/v1/auth/login"));
+        assert!(!requires_key(&Method::POST, "/api/v1/auth/refresh"));
+        assert!(!requires_key(&Method::POST, "/metrics"));
+        assert!(!requires_key(&Method::PUT, "/api/v1/users/1/password"));
+        assert!(!requires_key(&Method::POST, "/health"));
+    }
+
+    #[test]
     fn fingerprint_separa_usuario_e_rota() {
-        let base = fingerprint("POST", "/api/v1/users", Some("Bearer a"), "k1");
+        let base = fingerprint("POST", "/api/v1/users", "user:a", "k1");
+        assert_eq!(base, fingerprint("POST", "/api/v1/users", "user:a", "k1"));
+        assert_ne!(base, fingerprint("POST", "/api/v1/users", "user:b", "k1"));
+        assert_ne!(base, fingerprint("POST", "/api/v1/users", "user:a", "k2"));
+        assert_ne!(base, fingerprint("POST", "/api/v1/other", "user:a", "k1"));
+        assert!(!base.contains("user:a"));
+    }
+
+    #[test]
+    fn replay_preserva_apenas_headers_da_allowlist() {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert(LOCATION, HeaderValue::from_static("/api/v1/users/1"));
+        headers.insert("x-interno", HeaderValue::from_static("nao-vaza"));
+
+        let mut saved = replayable_headers(&headers);
+        saved.sort_by(|a, b| a.0.cmp(&b.0));
+
         assert_eq!(
-            base,
-            fingerprint("POST", "/api/v1/users", Some("Bearer a"), "k1")
+            saved,
+            vec![
+                ("content-type".to_owned(), "application/json".to_owned()),
+                ("location".to_owned(), "/api/v1/users/1".to_owned()),
+            ]
         );
-        assert_ne!(
-            base,
-            fingerprint("POST", "/api/v1/users", Some("Bearer b"), "k1")
-        );
-        assert_ne!(
-            base,
-            fingerprint("POST", "/api/v1/users", Some("Bearer a"), "k2")
-        );
-        assert_ne!(
-            base,
-            fingerprint("POST", "/api/v1/other", Some("Bearer a"), "k1")
-        );
-        assert!(!base.contains("Bearer a"));
     }
 }

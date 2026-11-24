@@ -473,19 +473,16 @@ expression: value
           "users"
         ],
         "summary": "Cria um usuário",
-        "description": "Requer `users:write`. Não existe cadastro público.",
+        "description": "Requer `users:write`. Não existe cadastro público. Exige `Idempotency-Key`.",
         "operationId": "create",
         "parameters": [
           {
             "name": "Idempotency-Key",
             "in": "header",
-            "description": "Repetir a mesma chave devolve a resposta original por 24 h (até 128 caracteres ASCII).",
-            "required": false,
+            "description": "Obrigatório. Repetir a mesma chave devolve a resposta original por 24 h (até 128 caracteres ASCII).",
+            "required": true,
             "schema": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             }
           }
         ],
@@ -501,7 +498,7 @@ expression: value
         },
         "responses": {
           "201": {
-            "description": "Usuário criado",
+            "description": "Usuário criado; `Location` aponta para o recurso",
             "content": {
               "application/json": {
                 "schema": {
@@ -511,7 +508,7 @@ expression: value
             }
           },
           "400": {
-            "description": "Dados inválidos",
+            "description": "Dados inválidos ou `Idempotency-Key` ausente",
             "content": {
               "application/json": {
                 "schema": {
@@ -821,7 +818,7 @@ expression: value
         ],
         "summary": "Redefine a senha de um usuário",
         "description": "Requer `users:write`. Invalida todas as sessões do usuário.",
-        "operationId": "change_password",
+        "operationId": "change",
         "parameters": [
           {
             "name": "id",

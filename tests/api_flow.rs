@@ -1,95 +1,19 @@
-//! Fluxo de ponta a ponta da gestão de usuários, com Postgres e Redis reais.
+//! Fluxo de API: autenticação, perfil, gestão de usuários, idempotência,
+//! rate limit, OpenAPI e métricas.
 //!
-//! Um único teste mantém os containers vivos e executa o fluxo completo em
-//! ordem. Os testes unitários cobrem as regras puras (último admin etc.).
+//! Um teste ordenado mantém os containers vivos e narra o fluxo completo; as
+//! regras puras ficam nos testes unitários de `src`.
 
-use std::sync::{Arc, Mutex};
+mod common;
 
 use axum::http::StatusCode;
-use axum_test::TestServer;
-use sea_orm::{ColumnTrait, Database, EntityTrait, PaginatorTrait, QueryFilter};
-use sea_orm_migration::MigratorTrait;
+use common::{ADMIN_EMAIL, ADMIN_PASSWORD, Harness, bearer, session};
 use serde_json::{Value, json};
-use template_backend_rust::{
-    app,
-    config::settings::Settings,
-    core::auth::role::Role,
-    core::{
-        auth::jwt::JwtService,
-        cache::Cache,
-        mail::{self, EmailMessage, Mailer, MailerError},
-        state::AppState,
-    },
-    database::entity::email_outbox::{Column as OutboxColumn, Entity as Outbox},
-    migrations::Migrator,
-    modules::{
-        email::service as email_service,
-        users::service::{self as users_service, NewUser},
-    },
-};
-use testcontainers::{ImageExt, runners::AsyncRunner};
-use testcontainers_modules::{postgres::Postgres, redis::Redis};
-
-const ADMIN_EMAIL: &str = "admin@teste.local";
-const ADMIN_PASSWORD: &str = "AdminTeste#2026";
 
 #[tokio::test]
-async fn fluxo_completo_de_usuarios() {
-    // --- infra ---
-    let postgres = Postgres::default()
-        .with_tag("18-alpine")
-        .start()
-        .await
-        .expect("postgres");
-    let redis = Redis::default()
-        .with_tag("8-alpine")
-        .start()
-        .await
-        .expect("redis");
-
-    let pg_port = postgres
-        .get_host_port_ipv4(5432)
-        .await
-        .expect("porta do postgres");
-    let redis_port = redis
-        .get_host_port_ipv4(6379)
-        .await
-        .expect("porta do redis");
-
-    let mut settings = Settings::default();
-    settings.database.url = format!("postgres://postgres:postgres@127.0.0.1:{pg_port}/postgres");
-    settings.redis.url = format!("redis://127.0.0.1:{redis_port}");
-    settings.jwt.secret = "segredo-de-integracao-com-mais-de-32-chars".to_owned();
-    settings.validate().expect("configuração de teste");
-
-    let db = Database::connect(&settings.database.url)
-        .await
-        .expect("conexão com o postgres");
-    Migrator::up(&db, None).await.expect("migrations");
-    let db_check = db.clone();
-
-    users_service::create(
-        &db,
-        NewUser {
-            name: "Admin".to_owned(),
-            email: ADMIN_EMAIL.to_owned(),
-            password: ADMIN_PASSWORD.to_owned(),
-            role: Role::Admin,
-        },
-    )
-    .await
-    .expect("admin de teste");
-
-    let cache = Cache::connect(&settings.redis).expect("cache");
-    let jwt = JwtService::new(&settings.jwt).expect("jwt");
-    let mailer = mail::from_settings(&settings.mail).expect("mailer");
-    let server = TestServer::new(app::build(AppState::new(
-        db,
-        cache,
-        jwt,
-        mailer,
-        Arc::new(settings),
-    )));
+async fn fluxo_de_api() {
+    let app = Harness::spawn().await;
+    let server = &app.server;
 
     // --- sem token ---
     let response = server.get("/api/v1/users").await;
@@ -100,10 +24,10 @@ async fn fluxo_completo_de_usuarios() {
             .starts_with("application/problem+json")
     );
 
-    let admin = login(&server, ADMIN_EMAIL, ADMIN_PASSWORD).await;
+    let admin = app.login(ADMIN_EMAIL, ADMIN_PASSWORD).await;
 
-    // --- criação ---
-    let response = server
+    // --- criação exige Idempotency-Key ---
+    let sem_chave = server
         .post("/api/v1/users")
         .add_header("authorization", bearer(&admin))
         .json(&json!({
@@ -113,16 +37,109 @@ async fn fluxo_completo_de_usuarios() {
             "role": "user"
         }))
         .await;
+    sem_chave.assert_status(StatusCode::BAD_REQUEST);
+    assert!(sem_chave.text().contains("Idempotency-Key"));
+
+    let response = server
+        .post("/api/v1/users")
+        .add_header("authorization", bearer(&admin))
+        .add_header("idempotency-key", "cria-ana")
+        .json(&json!({
+            "name": "Ana",
+            "email": "ana@teste.local",
+            "password": "SenhaDaAna#2026",
+            "role": "user"
+        }))
+        .await;
     response.assert_status(StatusCode::CREATED);
+    let ana_location = response
+        .headers()
+        .get("location")
+        .expect("Location no create")
+        .to_str()
+        .expect("location legível")
+        .to_owned();
     let created: Value = response.json();
     assert_eq!(created["email"], "ana@teste.local");
     assert_eq!(created["role"], "user");
     assert!(created.get("passwordHash").is_none());
     let ana_id = created["id"].as_str().expect("id da ana").to_owned();
+    assert_eq!(ana_location, format!("/api/v1/users/{ana_id}"));
 
+    // --- replay devolve a mesma resposta, inclusive o Location ---
+    let replay = server
+        .post("/api/v1/users")
+        .add_header("authorization", bearer(&admin))
+        .add_header("idempotency-key", "cria-ana")
+        .json(&json!({
+            "name": "Ana",
+            "email": "ana@teste.local",
+            "password": "SenhaDaAna#2026",
+            "role": "user"
+        }))
+        .await;
+    replay.assert_status(StatusCode::CREATED);
+    assert_eq!(
+        replay
+            .headers()
+            .get("location")
+            .expect("Location no replay")
+            .to_str()
+            .expect("location legível"),
+        ana_location
+    );
+    let replayed: Value = replay.json();
+    assert_eq!(replayed["id"], ana_id.as_str());
+
+    // --- login não passa por idempotência ---
+    let login_key = "login-nao-e-cacheado";
+    let first_login = server
+        .post("/api/v1/auth/login")
+        .add_header("idempotency-key", login_key)
+        .json(&json!({ "email": ADMIN_EMAIL, "password": ADMIN_PASSWORD }))
+        .await;
+    first_login.assert_status_ok();
+    let first_login: Value = first_login.json();
+
+    let second_login = server
+        .post("/api/v1/auth/login")
+        .add_header("idempotency-key", login_key)
+        .json(&json!({ "email": ADMIN_EMAIL, "password": ADMIN_PASSWORD }))
+        .await;
+    second_login.assert_status_ok();
+    let second_login: Value = second_login.json();
+    assert_ne!(
+        first_login["refreshToken"], second_login["refreshToken"],
+        "login repetido precisa gerar uma sessão nova"
+    );
+
+    // --- replay sobrevive à renovação do access token (fingerprint por `sub`) ---
+    let renewed = second_login["accessToken"]
+        .as_str()
+        .expect("access renovado")
+        .to_owned();
+    assert_ne!(renewed, admin);
+
+    let replay_com_token_novo = server
+        .post("/api/v1/users")
+        .add_header("authorization", bearer(&renewed))
+        .add_header("idempotency-key", "cria-ana")
+        .json(&json!({
+            "name": "Ana",
+            "email": "ana@teste.local",
+            "password": "SenhaDaAna#2026",
+            "role": "user"
+        }))
+        .await;
+    replay_com_token_novo.assert_status(StatusCode::CREATED);
+    let replayed: Value = replay_com_token_novo.json();
+    assert_eq!(replayed["id"], ana_id.as_str());
+
+    // --- conflito e chave inválida ---
     let duplicate = server
         .post("/api/v1/users")
         .add_header("authorization", bearer(&admin))
+        .add_header("idempotency-key", "duplicada")
         .json(&json!({
             "name": "Outra",
             "email": "ANA@teste.local",
@@ -131,49 +148,22 @@ async fn fluxo_completo_de_usuarios() {
         .await;
     duplicate.assert_status(StatusCode::CONFLICT);
 
-    // --- idempotência ---
-    let payload = json!({
-        "name": "Idem",
-        "email": "idem@teste.local",
-        "password": "IdemSenha#2026"
-    });
-    let first = server
-        .post("/api/v1/users")
-        .add_header("authorization", bearer(&admin))
-        .add_header("idempotency-key", "idem-user-1")
-        .json(&payload)
-        .await;
-    first.assert_status(StatusCode::CREATED);
-    let first: Value = first.json();
-
-    let replay = server
-        .post("/api/v1/users")
-        .add_header("authorization", bearer(&admin))
-        .add_header("idempotency-key", "idem-user-1")
-        .json(&payload)
-        .await;
-    replay.assert_status(StatusCode::CREATED);
-    let replay: Value = replay.json();
-    assert_eq!(first["id"], replay["id"]);
-
-    let idem_page: Value = server
-        .get("/api/v1/users?search=idem@teste.local")
-        .add_header("authorization", bearer(&admin))
-        .await
-        .json();
-    assert_eq!(idem_page["total"], 1, "a repetição não pode duplicar");
-
     let invalid_key = server
         .post("/api/v1/users")
         .add_header("authorization", bearer(&admin))
         .add_header("idempotency-key", "com espaco")
-        .json(&payload)
+        .json(&json!({
+            "name": "Curta",
+            "email": "curta@teste.local",
+            "password": "CurtaSenha#2026"
+        }))
         .await;
     invalid_key.assert_status(StatusCode::BAD_REQUEST);
 
     let invalid = server
         .post("/api/v1/users")
         .add_header("authorization", bearer(&admin))
+        .add_header("idempotency-key", "senha-curta")
         .json(&json!({
             "name": "Curta",
             "email": "curta@teste.local",
@@ -197,8 +187,15 @@ async fn fluxo_completo_de_usuarios() {
     assert_eq!(page["items"][0]["id"], ana_id.as_str());
     assert_eq!(page["perPage"], 10);
 
+    let by_role: Value = server
+        .get("/api/v1/users?role=admin&active=true")
+        .add_header("authorization", bearer(&admin))
+        .await
+        .json();
+    assert_eq!(by_role["total"], 1, "só o admin criado pelo harness");
+
     // --- usuário comum não gerencia usuários ---
-    let ana = login(&server, "ana@teste.local", "SenhaDaAna#2026").await;
+    let ana = app.login("ana@teste.local", "SenhaDaAna#2026").await;
     let forbidden = server
         .get("/api/v1/users")
         .add_header("authorization", bearer(&ana))
@@ -227,7 +224,7 @@ async fn fluxo_completo_de_usuarios() {
         .await;
     stale.assert_status(StatusCode::UNAUTHORIZED);
 
-    let ana_admin = login(&server, "ana@teste.local", "SenhaDaAna#2026").await;
+    let ana_admin = app.login("ana@teste.local", "SenhaDaAna#2026").await;
     let me: Value = server
         .get("/api/v1/auth/me")
         .add_header("authorization", bearer(&ana_admin))
@@ -284,12 +281,7 @@ async fn fluxo_completo_de_usuarios() {
         .await;
     old_login.assert_status(StatusCode::UNAUTHORIZED);
 
-    let new_login = server
-        .post("/api/v1/auth/login")
-        .json(&json!({ "email": "ana@teste.local", "password": "SenhaNova#2026" }))
-        .await;
-    new_login.assert_status_ok();
-    let ana_session: Value = new_login.json();
+    let ana_session = session(server, "ana@teste.local", "SenhaNova#2026").await;
     let ana_token = ana_session["accessToken"]
         .as_str()
         .expect("access token da ana")
@@ -374,12 +366,7 @@ async fn fluxo_completo_de_usuarios() {
         .await;
     old_password.assert_status(StatusCode::UNAUTHORIZED);
 
-    let final_login = server
-        .post("/api/v1/auth/login")
-        .json(&json!({ "email": "ana@teste.local", "password": "SenhaFinal#2026" }))
-        .await;
-    final_login.assert_status_ok();
-    let final_session: Value = final_login.json();
+    let final_session = session(server, "ana@teste.local", "SenhaFinal#2026").await;
     let final_access = final_session["accessToken"]
         .as_str()
         .expect("access final")
@@ -423,13 +410,8 @@ async fn fluxo_completo_de_usuarios() {
     access_still_valid.assert_status_ok();
 
     // Uma família nova, de outro login, não é afetada.
-    let other_session = server
-        .post("/api/v1/auth/login")
-        .json(&json!({ "email": "ana@teste.local", "password": "SenhaFinal#2026" }))
-        .await;
-    other_session.assert_status_ok();
-    let other_refresh: Value = other_session.json();
-    let other_refresh = other_refresh["refreshToken"]
+    let other_session = session(server, "ana@teste.local", "SenhaFinal#2026").await;
+    let other_refresh = other_session["refreshToken"]
         .as_str()
         .expect("refresh da outra sessão")
         .to_owned();
@@ -487,88 +469,6 @@ async fn fluxo_completo_de_usuarios() {
         .await;
     empty_patch.assert_status(StatusCode::BAD_REQUEST);
 
-    // --- outbox de e-mail ---
-    let pending = Outbox::find()
-        .filter(OutboxColumn::Status.eq("pending"))
-        .count(&db_check)
-        .await
-        .expect("contagem do outbox");
-    assert_eq!(pending, 5, "admin + ana + idem + reset + troca própria");
-
-    let recording = RecordingMailer::default();
-    let summary = email_service::process_pending(&db_check, &recording, 10)
-        .await
-        .expect("processar outbox");
-    assert_eq!(summary.claimed, 5);
-    assert_eq!(summary.sent, 5);
-    assert_eq!(summary.failed, 0);
-
-    let subjects: Vec<String> = recording
-        .sent
-        .lock()
-        .expect("lock")
-        .iter()
-        .map(|message| message.subject.clone())
-        .collect();
-    assert_eq!(
-        subjects
-            .iter()
-            .filter(|subject| *subject == "Sua conta foi criada")
-            .count(),
-        3
-    );
-    assert_eq!(
-        subjects
-            .iter()
-            .filter(|subject| *subject == "Sua senha foi alterada")
-            .count(),
-        2
-    );
-
-    let sent = Outbox::find()
-        .filter(OutboxColumn::Status.eq("sent"))
-        .count(&db_check)
-        .await
-        .expect("enviados");
-    assert_eq!(sent, 5);
-
-    // Deduplicação pelo dedupe_key.
-    let message = EmailMessage {
-        to: "dedupe@teste.local".to_owned(),
-        subject: "Teste".to_owned(),
-        body: "corpo".to_owned(),
-    };
-    email_service::enqueue(&db_check, message.clone(), "manual-dedupe".to_owned())
-        .await
-        .expect("primeiro enqueue");
-    email_service::enqueue(&db_check, message, "manual-dedupe".to_owned())
-        .await
-        .expect("segundo enqueue");
-
-    let deduped = Outbox::find()
-        .filter(OutboxColumn::DedupeKey.eq("manual-dedupe"))
-        .count(&db_check)
-        .await
-        .expect("dedupe");
-    assert_eq!(deduped, 1);
-
-    // Falha de envio reagenda com backoff e incrementa attempts.
-    let summary = email_service::process_pending(&db_check, &FailingMailer, 10)
-        .await
-        .expect("processar com falha");
-    assert_eq!(summary.claimed, 1);
-    assert_eq!(summary.retried, 1);
-
-    let manual = Outbox::find()
-        .filter(OutboxColumn::DedupeKey.eq("manual-dedupe"))
-        .one(&db_check)
-        .await
-        .expect("buscar manual")
-        .expect("manual existe");
-    assert_eq!(manual.status, "pending");
-    assert_eq!(manual.attempts, 1);
-    assert!(manual.last_error.is_some());
-
     // --- documentação ---
     let spec: Value = server.get("/api-docs/openapi.json").await.json();
     assert!(spec["paths"]["/api/v1/users"].is_object());
@@ -585,44 +485,4 @@ async fn fluxo_completo_de_usuarios() {
     metrics.assert_status_ok();
     let metrics = metrics.text();
     assert!(metrics.contains("axum_http_requests_total"), "{metrics}");
-}
-
-fn bearer(token: &str) -> String {
-    format!("Bearer {token}")
-}
-
-async fn login(server: &TestServer, email: &str, password: &str) -> String {
-    let response = server
-        .post("/api/v1/auth/login")
-        .json(&json!({ "email": email, "password": password }))
-        .await;
-    response.assert_status_ok();
-
-    let body: Value = response.json();
-    body["accessToken"]
-        .as_str()
-        .expect("access token")
-        .to_owned()
-}
-
-#[derive(Default)]
-struct RecordingMailer {
-    sent: Mutex<Vec<EmailMessage>>,
-}
-
-#[async_trait::async_trait]
-impl Mailer for RecordingMailer {
-    async fn send(&self, message: &EmailMessage) -> Result<(), MailerError> {
-        self.sent.lock().expect("lock").push(message.clone());
-        Ok(())
-    }
-}
-
-struct FailingMailer;
-
-#[async_trait::async_trait]
-impl Mailer for FailingMailer {
-    async fn send(&self, _message: &EmailMessage) -> Result<(), MailerError> {
-        Err(MailerError::Transport("falha simulada".to_owned()))
-    }
 }
