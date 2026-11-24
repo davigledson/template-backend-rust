@@ -15,6 +15,7 @@ use crate::{
 };
 
 /// Desativação (soft delete). Repetir a operação é idempotente.
+#[tracing::instrument(skip(db), fields(target_id = %target_id))]
 pub async fn deactivate(
     db: &DatabaseConnection,
     actor: &AuthUser,

@@ -111,4 +111,46 @@ async fn fluxo_do_outbox_de_email() {
         .expect("reprocessar");
     assert_eq!(summary.sent, 1);
     assert_eq!(recording.subjects(), vec!["Teste".to_owned()]);
+
+    // --- falha terminal, inspeção e reprocessamento ---
+    email_service::enqueue(
+        db,
+        EmailMessage {
+            to: "terminal@teste.local".to_owned(),
+            subject: "Falhou".to_owned(),
+            body: "corpo".to_owned(),
+        },
+        "manual-terminal".to_owned(),
+    )
+    .await
+    .expect("enqueue terminal");
+
+    // Simula as 5 tentativas esgotadas.
+    Outbox::update_many()
+        .col_expr(OutboxColumn::Status, Expr::value("failed"))
+        .col_expr(OutboxColumn::Attempts, Expr::value(5))
+        .col_expr(OutboxColumn::LastError, Expr::value("falha simulada"))
+        .filter(OutboxColumn::DedupeKey.eq("manual-terminal"))
+        .exec(db)
+        .await
+        .expect("marcar como failed");
+
+    let depth = email_service::depth(db).await.expect("depth");
+    assert_eq!(depth.failed, 1);
+    assert_eq!(email_service::depth(db).await.expect("depth").pending, 0);
+
+    let failed = email_service::list(db, "failed", 10)
+        .await
+        .expect("listar failed");
+    assert_eq!(failed.len(), 1);
+
+    assert!(email_service::retry(db, failed[0].id).await.expect("retry"));
+    assert_eq!(email_service::depth(db).await.expect("depth").failed, 0);
+
+    let recording = RecordingMailer::default();
+    let summary = email_service::process_pending(db, &recording, 10)
+        .await
+        .expect("processar o reprocessado");
+    assert_eq!(summary.sent, 1);
+    assert_eq!(recording.subjects(), vec!["Falhou".to_owned()]);
 }

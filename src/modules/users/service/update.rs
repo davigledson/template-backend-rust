@@ -33,6 +33,7 @@ impl UserUpdate {
 }
 
 /// Atualização parcial feita por um administrador.
+#[tracing::instrument(skip(db, input), fields(target_id = %target_id))]
 pub async fn update(
     db: &DatabaseConnection,
     actor: &AuthUser,

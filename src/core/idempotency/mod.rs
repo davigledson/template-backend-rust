@@ -25,7 +25,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 
-use crate::core::{error::AppError, state::AppState};
+use crate::core::{error::AppError, metrics, state::AppState};
 use key::{fingerprint, requires_key, subject, valid_key};
 use store::{Acquired, StoredResponse, acquire, delete, replayable_headers, save};
 
@@ -62,8 +62,12 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
 
     let cache = &state.cache;
     match acquire(cache, &fingerprint).await {
-        Ok(Acquired::Replay(stored)) => return store::replay(stored),
+        Ok(Acquired::Replay(stored)) => {
+            metrics::idempotency_replay();
+            return store::replay(stored);
+        }
         Ok(Acquired::Busy) => {
+            metrics::idempotency_conflict();
             return AppError::Conflict(
                 "já existe uma requisição em andamento com esta Idempotency-Key".to_owned(),
             )

@@ -1,7 +1,7 @@
 //! Sessão: refresh com rotação e detecção de reuso, e logout.
 
 use crate::{
-    core::{auth::role::Role, error::AppError, state::AppState},
+    core::{auth::role::Role, error::AppError, metrics, state::AppState},
     modules::{
         auth::{
             dto::{RefreshRequest, TokenResponse},
@@ -12,6 +12,7 @@ use crate::{
     },
 };
 
+#[tracing::instrument(skip(state, request))]
 pub async fn refresh(state: &AppState, request: RefreshRequest) -> Result<TokenResponse, AppError> {
     let token = request.refresh_token.trim();
     if token.is_empty() {
@@ -22,6 +23,7 @@ pub async fn refresh(state: &AppState, request: RefreshRequest) -> Result<TokenR
     let ticket = match repository::consume(&state.cache, token, ttl).await? {
         ConsumeOutcome::Active(ticket) => ticket,
         ConsumeOutcome::Reused(family_id) => {
+            metrics::refresh_reuse();
             repository::revoke_family(&state.cache, family_id, ttl).await?;
             tracing::warn!(
                 family = %family_id,
@@ -53,6 +55,7 @@ pub async fn refresh(state: &AppState, request: RefreshRequest) -> Result<TokenR
     issue_tokens(state, &user, role, ticket.family_id).await
 }
 
+#[tracing::instrument(skip(state, request))]
 pub async fn logout(state: &AppState, request: RefreshRequest) -> Result<(), AppError> {
     let token = request.refresh_token.trim();
     if !token.is_empty() {

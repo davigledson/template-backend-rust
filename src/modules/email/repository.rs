@@ -3,7 +3,7 @@
 use chrono::{DateTime, Duration, FixedOffset, Utc};
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DbErr, EntityTrait, ExprTrait,
-    QueryFilter, QueryOrder, QuerySelect, TransactionTrait, sea_query::Expr,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, TransactionTrait, sea_query::Expr,
 };
 
 use crate::database::entity::email_outbox::{self, ActiveModel, Column, Entity};
@@ -141,4 +141,83 @@ pub async fn delete_sent_before(
         .exec(db)
         .await
         .map(|result| result.rows_affected)
+}
+
+/// Contagem por status, para as métricas de profundidade do outbox.
+pub async fn count_by_status(db: &DatabaseConnection, status: &str) -> Result<u64, DbErr> {
+    Entity::find()
+        .filter(Column::Status.eq(status))
+        .count(db)
+        .await
+}
+
+/// Enviados desde um instante, para a janela de 24 h.
+pub async fn count_sent_since(
+    db: &DatabaseConnection,
+    cutoff: DateTime<FixedOffset>,
+) -> Result<u64, DbErr> {
+    Entity::find()
+        .filter(Column::Status.eq("sent"))
+        .filter(Column::SentAt.gte(cutoff))
+        .count(db)
+        .await
+}
+
+/// Itens de um status, mais antigos primeiro.
+pub async fn list_by_status(
+    db: &DatabaseConnection,
+    status: &str,
+    limit: u64,
+) -> Result<Vec<email_outbox::Model>, DbErr> {
+    Entity::find()
+        .filter(Column::Status.eq(status))
+        .order_by_asc(Column::CreatedAt)
+        .limit(limit)
+        .all(db)
+        .await
+}
+
+/// Devolve um item ao processamento imediato, sem esperar o backoff.
+///
+/// Só aceita `pending`/`failed`: `sent` não deve ser reenviado e `processing`
+/// pode estar em outra transação.
+pub async fn requeue(db: &DatabaseConnection, id: uuid::Uuid) -> Result<u64, DbErr> {
+    let now = Utc::now().fixed_offset();
+
+    Entity::update_many()
+        .col_expr(Column::Status, Expr::value("pending"))
+        .col_expr(Column::NextAttemptAt, Expr::value(now))
+        .col_expr(
+            Column::LockedAt,
+            Expr::value(Option::<DateTime<FixedOffset>>::None),
+        )
+        .filter(Column::Id.eq(id))
+        .filter(Column::Status.is_in(["pending", "failed"]))
+        .exec(db)
+        .await
+        .map(|result| result.rows_affected)
+}
+
+/// Reprocessa todos os itens de um status (`pending` ou `failed`).
+pub async fn requeue_all(
+    db: &DatabaseConnection,
+    status: &str,
+    reset_attempts: bool,
+) -> Result<u64, DbErr> {
+    let now = Utc::now().fixed_offset();
+
+    let mut query = Entity::update_many()
+        .col_expr(Column::Status, Expr::value("pending"))
+        .col_expr(Column::NextAttemptAt, Expr::value(now))
+        .col_expr(
+            Column::LockedAt,
+            Expr::value(Option::<DateTime<FixedOffset>>::None),
+        )
+        .filter(Column::Status.eq(status));
+
+    if reset_attempts {
+        query = query.col_expr(Column::Attempts, Expr::value(0));
+    }
+
+    query.exec(db).await.map(|result| result.rows_affected)
 }

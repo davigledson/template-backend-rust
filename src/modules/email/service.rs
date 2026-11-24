@@ -11,7 +11,12 @@ use sea_orm::{ConnectionTrait, DatabaseConnection, Set};
 use uuid::Uuid;
 
 use crate::{
-    core::{error::AppError, mail::EmailMessage, mail::Mailer},
+    core::{
+        error::AppError,
+        mail::{EmailMessage, Mailer},
+        metrics,
+        state::AppState,
+    },
     database::entity::email_outbox,
     modules::email::repository,
 };
@@ -19,6 +24,16 @@ use crate::{
 pub const MAX_ATTEMPTS: i32 = 5;
 pub const RETENTION_DAYS: i64 = 30;
 pub const BATCH_SIZE: u64 = 20;
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct OutboxDepth {
+    pub pending: u64,
+    pub failed: u64,
+    pub sent_24h: u64,
+}
+
+/// Intervalo de atualização dos gauges de outbox no processo da API.
+const DEPTH_INTERVAL_SECS: u64 = 30;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct ProcessSummary {
@@ -54,6 +69,7 @@ where
 }
 
 /// Processa um lote de e-mails pendentes.
+#[tracing::instrument(skip(db, mailer), fields(batch = limit))]
 pub async fn process_pending(
     db: &DatabaseConnection,
     mailer: &dyn Mailer,
@@ -104,6 +120,61 @@ pub async fn process_pending(
     }
 
     Ok(summary)
+}
+
+/// Profundidade atual do outbox, usada pelas métricas e pelo runbook.
+pub async fn depth(db: &DatabaseConnection) -> Result<OutboxDepth, AppError> {
+    let day_ago = Utc::now().fixed_offset() - Duration::hours(24);
+
+    Ok(OutboxDepth {
+        pending: repository::count_by_status(db, "pending").await?,
+        failed: repository::count_by_status(db, "failed").await?,
+        sent_24h: repository::count_sent_since(db, day_ago).await?,
+    })
+}
+
+/// Publica os gauges de outbox a cada 30 s no processo da API.
+///
+/// O worker não expõe `/metrics`, então medir lá seria inútil: o scrape
+/// acontece no processo HTTP, que lê o estado do banco.
+pub fn spawn_depth_reporter(state: AppState) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(DEPTH_INTERVAL_SECS));
+
+        loop {
+            ticker.tick().await;
+
+            match depth(&state.db).await {
+                Ok(depth) => {
+                    metrics::set_outbox_depth(depth.pending, depth.failed, depth.sent_24h);
+                }
+                Err(error) => tracing::warn!(error = %error, "falha ao medir o outbox"),
+            }
+        }
+    });
+}
+
+/// Lista itens de um status para inspeção (`pending` ou `failed`).
+pub async fn list(
+    db: &DatabaseConnection,
+    status: &str,
+    limit: u64,
+) -> Result<Vec<email_outbox::Model>, AppError> {
+    Ok(repository::list_by_status(db, status, limit).await?)
+}
+
+/// Devolve um item ao processamento imediato. `false` se não havia o que fazer.
+pub async fn retry(db: &DatabaseConnection, id: Uuid) -> Result<bool, AppError> {
+    Ok(repository::requeue(db, id).await? > 0)
+}
+
+/// Reprocessa todos os itens de um status; `force` zera o contador de tentativas.
+pub async fn retry_all(
+    db: &DatabaseConnection,
+    status: &str,
+    force: bool,
+) -> Result<u64, AppError> {
+    Ok(repository::requeue_all(db, status, force).await?)
 }
 
 /// Remove e-mails enviados há mais de `RETENTION_DAYS`.

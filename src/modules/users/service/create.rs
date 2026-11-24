@@ -26,6 +26,7 @@ pub struct NewUser {
     pub role: Role,
 }
 
+#[tracing::instrument(skip(db, input))]
 pub async fn create(db: &DatabaseConnection, input: NewUser) -> Result<users::Model, AppError> {
     let name = input.name.trim();
     let email = normalize_email(&input.email);

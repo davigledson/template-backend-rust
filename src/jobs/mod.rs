@@ -75,6 +75,7 @@ pub async fn run(settings: Settings) -> Result<(), AppError> {
     Ok(())
 }
 
+#[tracing::instrument(skip(db, mailer))]
 async fn process_outbox(db: &DatabaseConnection, mailer: &dyn mail::Mailer) {
     let started = Instant::now();
 

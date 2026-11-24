@@ -8,6 +8,7 @@ use crate::{
             role::Role,
         },
         error::AppError,
+        metrics,
         state::AppState,
     },
     modules::{
@@ -20,6 +21,7 @@ use crate::{
     },
 };
 
+#[tracing::instrument(skip(state, request, client_ip))]
 pub async fn login(
     state: &AppState,
     request: LoginRequest,
@@ -40,7 +42,7 @@ pub async fn login(
         &limiter,
         &account_key,
         state.config.rate_limit.login_account_attempts,
-        "conta",
+        "account",
     )
     .await?;
     enforce_limit(
@@ -58,6 +60,7 @@ pub async fn login(
     };
 
     let Some(user) = candidate.filter(|_| password_ok) else {
+        metrics::login_failure();
         register_failure(&limiter, &account_key, &ip_key).await;
         return Err(invalid_credentials());
     };
@@ -77,11 +80,12 @@ async fn enforce_limit(
     limiter: &LoginRateLimiter<'_>,
     key: &str,
     max_attempts: u32,
-    scope: &str,
+    scope: &'static str,
 ) -> Result<(), AppError> {
     match limiter.check(key, max_attempts).await {
         Ok(LimitDecision::Allowed) => Ok(()),
         Ok(LimitDecision::Blocked { retry_after_secs }) => {
+            metrics::login_blocked(scope);
             tracing::warn!(scope, retry_after_secs, "login bloqueado por rate limit");
             Err(AppError::TooManyRequests { retry_after_secs })
         }

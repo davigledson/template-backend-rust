@@ -12,6 +12,7 @@ use template_backend_rust::{
         telemetry,
     },
     database::connection,
+    modules::email::service as email_service,
 };
 use tokio::net::TcpListener;
 
@@ -69,6 +70,7 @@ async fn run(settings: Settings) -> Result<(), AppError> {
     let jwt = JwtService::new(&config.jwt)?;
     let mailer = mail::from_settings(&config.mail).map_err(AppError::internal)?;
     let state = AppState::new(db, cache, jwt, mailer, Arc::clone(&config));
+    email_service::spawn_depth_reporter(state.clone());
     let router = app::build(state);
 
     let address = format!("{}:{}", config.server.host, config.server.port);

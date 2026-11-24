@@ -485,4 +485,14 @@ async fn fluxo_de_api() {
     metrics.assert_status_ok();
     let metrics = metrics.text();
     assert!(metrics.contains("axum_http_requests_total"), "{metrics}");
+    assert!(metrics.contains("app_login_failure_total"), "{metrics}");
+    assert!(
+        metrics.contains("app_login_blocked_total{scope=\"account\"} 1"),
+        "{metrics}"
+    );
+    assert!(metrics.contains("app_refresh_reuse_total 1"), "{metrics}");
+    assert!(
+        metrics.contains("app_idempotency_replay_total 2"),
+        "{metrics}"
+    );
 }
