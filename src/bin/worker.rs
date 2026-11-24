@@ -1,22 +1,33 @@
 //! Binário do worker (cron).
 //!
-//! Fase 0: apenas inicializa o tracing. O scheduler entra na Fase 6.
+//! Fase 1: carrega configuração e logging. O scheduler entra na Fase 6.
+
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::process::ExitCode;
 
-use tracing_subscriber::{EnvFilter, fmt};
-
-fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    fmt().with_env_filter(filter).with_target(true).init();
-}
+use template_backend_rust::{config::Settings, core::telemetry};
 
 fn main() -> ExitCode {
-    init_tracing();
+    let settings = match Settings::load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if let Err(error) = telemetry::init(&settings.log) {
+        eprintln!("falha ao iniciar o logging: {error}");
+        return ExitCode::FAILURE;
+    }
+
     tracing::info!(
-        app = template_backend_rust::APP_NAME,
-        version = template_backend_rust::APP_VERSION,
-        "worker iniciado em modo esqueleto (fase 0)"
+        profile = %settings.profile,
+        timezone = %settings.jobs.timezone,
+        jobs_enabled = settings.jobs.enabled,
+        "worker pronto (sem jobs registrados — fase 6)"
     );
+
     ExitCode::SUCCESS
 }

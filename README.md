@@ -63,6 +63,15 @@ Precedência (do menor para o maior):
 Segredos nunca ficam em TOML. `APP__JWT__SECRET` é obrigatório e precisa ter
 no mínimo 32 caracteres (validado no boot).
 
+## Endpoints de infraestrutura
+
+| Rota | O que faz |
+|---|---|
+| `GET /health` | liveness: o processo está de pé (não toca no banco) |
+| `GET /health/ready` | readiness: exige Postgres e Redis; devolve `503` se algum cair |
+
+Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
+
 ## Estrutura planejada
 
 ```text
@@ -90,7 +99,7 @@ src/
 | Fase | Entrega | Status |
 |---|---|---|
 | 0 | Esqueleto, config, compose, justfile | ✅ |
-| 1 | Core: settings, state, erro, http, health, shutdown | ⬜ |
+| 1 | Core: settings, state, erro, http, health, shutdown | ✅ |
 | 2 | Migrations, entidades e migrator | ⬜ |
 | 3 | Auth JWT (login/refresh/logout/me) | ⬜ |
 | 4 | `products` como módulo-referência + OpenAPI | ⬜ |

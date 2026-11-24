@@ -1,22 +1,83 @@
 //! Binário da API HTTP.
-//!
-//! Fase 0: apenas inicializa o tracing. O servidor Axum entra na Fase 1.
 
-use std::process::ExitCode;
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use tracing_subscriber::{EnvFilter, fmt};
+use std::{process::ExitCode, sync::Arc};
 
-fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    fmt().with_env_filter(filter).with_target(true).init();
-}
+use template_backend_rust::{
+    app,
+    config::Settings,
+    core::{cache::Cache, error::AppError, shutdown, state::AppState, telemetry},
+    database::connection,
+};
+use tokio::net::TcpListener;
 
 fn main() -> ExitCode {
-    init_tracing();
+    let settings = match Settings::load() {
+        Ok(settings) => settings,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if let Err(error) = telemetry::init(&settings.log) {
+        eprintln!("falha ao iniciar o logging: {error}");
+        return ExitCode::FAILURE;
+    }
+
+    let runtime = match build_runtime(&settings) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("falha ao criar o runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match runtime.block_on(run(settings)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!(error = %error, "api encerrada com erro");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn build_runtime(settings: &Settings) -> Result<tokio::runtime::Runtime, std::io::Error> {
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all();
+    if let Some(workers) = settings.server.worker_threads() {
+        builder.worker_threads(workers);
+    }
+    builder.build()
+}
+
+async fn run(settings: Settings) -> Result<(), AppError> {
+    let config = Arc::new(settings);
+
     tracing::info!(
-        app = template_backend_rust::APP_NAME,
+        profile = %config.profile,
         version = template_backend_rust::APP_VERSION,
-        "api iniciada em modo esqueleto (fase 0)"
+        "iniciando api"
     );
-    ExitCode::SUCCESS
+
+    let db = connection::connect(&config.database).await?;
+    let cache = Cache::connect(&config.redis)?;
+    let state = AppState::new(db, cache, Arc::clone(&config));
+    let router = app::build(state);
+
+    let address = format!("{}:{}", config.server.host, config.server.port);
+    let listener = TcpListener::bind(&address)
+        .await
+        .map_err(AppError::internal)?;
+
+    tracing::info!(address = %address, "api ouvindo");
+
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown::signal())
+        .await
+        .map_err(AppError::internal)?;
+
+    tracing::info!("api encerrada com sucesso");
+    Ok(())
 }
