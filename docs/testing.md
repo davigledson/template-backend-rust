@@ -1,0 +1,142 @@
+# Testes
+
+## Piramide do projeto
+
+```text
+        ▲  poucos, lentos
+   integração (testcontainers + axum-test)
+  ─────────────────────────────────────────
+   unitários de service, DTO, JWT, permissão
+        ▼  muitos, rápidos
+```
+
+- **Unitário**: regra pura, sem banco e sem HTTP. Roda em milissegundos.
+- **Integração**: rota real + Postgres/Redis reais em container.
+- Não usamos mock de banco: mock de SQL testa o mock, não a query.
+
+## Comandos
+
+| Comando | Uso |
+|---|---|
+| `just test` | tudo (`cargo nextest run`) |
+| `just test-unit` | só a lib |
+| `just test-verbose` | com `println!`/`tracing` visíveis |
+| `cargo test nome_do_teste` | um teste específico |
+| `just ci` | fmt + lint + check + test |
+
+`nextest` roda cada teste em processo próprio e faz retry de teste instável
+(`nextest.toml`: 1 retry local, 2 no perfil `ci`, timeout de 60 s).
+
+O crate tem `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`.
+`clippy.toml` libera `unwrap`/`expect` **em testes** — produção continua proibida.
+
+## Testes unitários
+
+Ficam no fim do arquivo testado:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usuario_comum_nao_gerencia_usuarios() {
+        assert!(Role::User.can(PROFILE_WRITE));
+        assert!(!Role::User.can(USERS_READ));
+    }
+}
+```
+
+O que sempre tem teste:
+
+- política de senha (`hash`/`verify`, senha curta);
+- claims do JWT (emitir/decodificar, token adulterado, outro segredo);
+- permissões por papel;
+- extração/validação de DTO (e-mail, paginação);
+- regra de service sem I/O (normalização, cálculo, transição de estado).
+
+Não escreva teste que só repete o corpo da função. Teste **comportamento
+observável** e casos de borda: vazio, limite, duplicado, não encontrado, sem
+permissão.
+
+## Testes de integração
+
+Dependências já no `Cargo.toml`: `axum-test`, `testcontainers` 0.27 e
+`testcontainers-modules` 0.15 (`postgres`, `redis`). Ainda não existe `tests/`
+— entra na fase 7.
+
+Esqueleto de um teste de auth:
+
+```rust
+use axum_test::TestServer;
+use testcontainers::runners::AsyncRunner;
+use testcontainers_modules::{postgres::Postgres, redis::Redis};
+
+#[tokio::test]
+async fn login_e_me() {
+    let pg = Postgres::default().start().await.expect("postgres");
+    let redis = Redis::default().start().await.expect("redis");
+
+    let pg_port = pg.get_host_port_ipv4(5432).await.expect("porta");
+    // monte a URL com pg_port, rode as migrations via Migrator::up e construa
+    // Settings/AppState de teste; depois:
+    let server = TestServer::new(app::build(state)).expect("server");
+
+    let response = server
+        .post("/api/v1/auth/login")
+        .json(&serde_json::json!({
+            "email": "admin@teste.local",
+            "password": "uma-senha-bem-longa-123"
+        }))
+        .await;
+
+    response.assert_status_ok();
+    assert!(response.json::<serde_json::Value>()["accessToken"].is_string());
+}
+```
+
+Regras para integração:
+
+- **container por suíte**, não por teste (subir Postgres custa segundos);
+- migrations rodam no setup (`Migrator::up`);
+- cada teste usa dados próprios (e-mail único) e não assume ordem;
+- teste sempre asserta status, `content-type` e o campo relevante;
+- Redis pode ser substituído por um fake só quando o comportamento testado não
+  for o Redis.
+
+## O que um endpoint novo precisa provar
+
+- [ ] caminho feliz (status + corpo)
+- [ ] entrada inválida → 400 `problem+json`
+- [ ] sem token → 401
+- [ ] sem permissão → 403
+- [ ] recurso inexistente → 404
+- [ ] conflito/duplicidade → 409
+- [ ] isolamento: usuário A não acessa recurso de B
+- [ ] `POST` com `Idempotency-Key`: repetir não duplica
+
+## Smoke manual
+
+Antes de dizer que terminou, com a API rodando em background:
+
+```bash
+curl -sf localhost:8080/health/ready
+
+# auth
+curl -s -X POST localhost:8080/api/v1/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"admin@teste.local","password":"..."}' | jq .accessToken
+```
+
+Fluxo completo de auth: login → `me` → refresh (token antigo deve dar 401) →
+logout → refresh (401). Nunca deixe o servidor em foreground no chat; pare o
+processo ao terminar.
+
+## CI
+
+```bash
+just ci     # fmt lint check test
+```
+
+Falha de lint é falha de build. Teste instável deve ser corrigido, não marcado
+como `#[ignore]` sem justificativa e prazo.

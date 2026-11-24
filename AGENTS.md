@@ -1,0 +1,231 @@
+# AGENTS.md — contrato do template-backend-rust
+
+Este arquivo vale para agentes de código e para pessoas. As regras são curtas,
+verificáveis e não opcionais. O "porquê" completo está em `docs/`.
+
+## Contexto
+
+- Rust 1.99 (fixado em `rust-toolchain.toml`), edição 2024.
+- Axum 0.8 + SeaORM 2.0 + PostgreSQL 18 + Redis 8.
+- **Uma API** (`/api/v1`) + um **worker** de cron, do mesmo código.
+- **Monólito modular por feature**: `modules/<feature>` é dono das suas rotas,
+  regras e tabelas; `core` é infraestrutura compartilhada.
+- Escopo atual: `users` + autenticação. Sem CRUD genérico e sem Keycloak.
+- Alvo de deploy: 2 vCPU / 2 GB (API + Postgres + Redis no mesmo host).
+
+## Antes de começar
+
+1. Leia `docs/architecture.md` (desenho) e `docs/adding-a-module.md` (passo a passo).
+2. Confira o ambiente: `just doctor`.
+3. Nunca deixe servidor em foreground no chat. Use `just dev` em background ou o
+   `davi-dev` do hub e leia só as últimas linhas do log.
+4. Ao terminar, pare o processo que você iniciou.
+
+## Comandos
+
+| Comando | O que faz |
+|---|---|
+| `just setup` | `.env`, infra e dependências |
+| `just doctor` | versões, containers e `.env` |
+| `just up` / `down` / `reset` | infra (reset apaga volumes) |
+| `just migrate` | aplica migrations pendentes |
+| `just dev` | API em `http://localhost:8080` |
+| `just worker` | worker de cron |
+| `just test` | testes com `cargo nextest` |
+| `just fmt` / `just lint` / `just check` | qualidade |
+| `just entities` | gera entidades a partir do banco |
+| `just admin-create <email> "<nome>" [true]` | cria admin (primeiro, ou outro com `true`) |
+| `just admin-promote <email>` | promove usuário a admin |
+| `just admin-reset-password <email>` | redefine senha e invalida sessões |
+| `just ci` | fmt + lint + check + test |
+
+## Mapa
+
+```text
+src/
+├── main.rs            binário api
+├── app.rs             estado + rotas + camadas HTTP
+├── bin/               admin, migrator, worker
+├── config/            settings.rs (figment)
+├── core/              auth, cache, erro, http, response, health, state
+├── database/          connection + entity (gerada)
+├── migrations/        migrations in-crate
+├── modules/           auth, users
+└── routes/            só faz nest
+```
+
+Direção das dependências:
+
+```text
+routes → modules/<feature> → core
+                     ↘ database/entity (gerado)
+```
+
+## Regras que não se negociam
+
+- **Só o módulo dono escreve na sua tabela.** Nada de SQL na tabela de outro módulo.
+- **Sem ciclos.** `auth → users` pode; `users → auth` não.
+- **`unwrap`, `expect` e `panic` são proibidos** no caminho de request. Erros viram
+  `AppError` e saem em `application/problem+json`.
+- **Permissão, não papel**: `auth.require(USERS_WRITE)`. Nunca `if role == admin`.
+- **Entidade é gerada.** Rode `just entities`; não edite `database/entity/` à mão.
+- **Migration é forward-only** e nunca roda no boot da API.
+- **Segredo nunca** em TOML, log ou commit. Use `APP__*`/`.env` (só dev).
+- **Validação no DTO**, antes do service. Repository não valida.
+- **Transação curta**; efeitos externos (e-mail, webhook) depois do commit.
+- **Sem `utils.rs`.** Helper sem dono vai para `core::<tema>`; com dono, fica no módulo.
+- **Sem repositório genérico** e sem container de DI: `AppState` + `Arc` bastam.
+
+## Camadas
+
+| Camada | Pode | Não pode |
+|---|---|---|
+| `controller.rs` | extrair, validar via DTO, chamar service, responder | SQL, regra, Redis |
+| `service.rs` | regra, transação, orquestrar repositórios | conhecer HTTP |
+| `repository.rs` | query SeaORM (recebe a conexão) | validar, decidir status |
+| `dto.rs` | serde + validação + schema | lógica |
+| `entity/` | mapeamento gerado | ser editado à mão |
+| `core/` | infraestrutura genérica | regra de feature |
+
+`service.rs` é opcional em CRUD puro; regra ou transação exige service.
+
+Alvos de tamanho: controller ≤120, service ≤150, repository ≤150, dto ≤80 linhas.
+Passou disso, quebre por sub-recurso — não crie camada nova.
+
+## Auth e permissões
+
+- Papéis: `admin` e `user`. Permissões: `users:read`, `users:write`,
+  `users:delete`, `profile:write`.
+- `AuthUser` (extractor) valida assinatura/expiração e **não consulta o banco**.
+- Rotas sensíveis chamam `users::service::require_session`, que confere `active`,
+  `token_version` e papel no banco.
+- `token_version` sobe ao trocar senha/papel ou desativar → invalida refresh e
+  sessões sensíveis na hora.
+- Primeiro admin **só por CLI** (`just admin-create`). Nunca rota pública nem seed
+  com senha.
+- Access token: 15 min. Refresh: opaco, hasheado no Redis, rotação com `GETDEL`.
+
+## Banco e migrations
+
+- UUID v7 (`Uuid::now_v7()`), `timestamptz` UTC, `numeric` para dinheiro.
+- Tabelas e colunas em `snake_case`; tabela no plural.
+- Toda FK e todo filtro/ordenação usado em query tem índice.
+- Desativação por `active` (soft delete); `version` para concorrência otimista.
+- Migration em `src/migrations/mYYYYMMDD_HHMMSS_nome.rs`; depois `just entities`.
+- Nunca edite uma migration já aplicada; crie outra.
+
+## API
+
+- Prefixo `/api/v1`; rotas no plural; JSON em `camelCase`.
+- Lista: `{ items, page, perPage, total }`.
+- Erro: `application/problem+json` (RFC 9457).
+- `404`/`405` também em Problem Details.
+- `POST` sem ID natural exige `Idempotency-Key`; retry nunca duplica.
+- Mudança breaking de contrato só com depreciação e aviso.
+
+## Segurança
+
+- Argon2id, mínimo de 12 caracteres; nunca logar senha, token ou PII.
+- Limite de body, timeouts, CORS por ambiente e `x-request-id` já estão nas camadas.
+- Rate limit no login e detecção de reuso de refresh são hardening pendente (fase 7).
+- Dependência nova: mantida, licença permitida, features mínimas, `cargo deny`.
+- Segredo JWT: mínimo 32 caracteres, só via `APP__JWT__SECRET`.
+
+## Performance (2 vCPU / 2 GB)
+
+- Pool do banco: 8; Redis: 8; `worker_threads = 2` em produção.
+- Proibido N+1; paginar sempre; sem `SELECT *` em rota quente.
+- Sem I/O bloqueante dentro de `async`; sem transação ao redor de HTTP.
+- Job de cron não pode segurar o tick; se passar de ~30 s, vira fila.
+- Meça antes de otimizar.
+
+## Testes
+
+- Toda regra de service tem teste unitário.
+- Todo endpoint novo tem teste de integração (testcontainers — fase 7).
+- Autorização e idempotência têm teste próprio.
+- Snapshot do OpenAPI é atualizado no mesmo PR (fase 4).
+- Antes de finalizar: `just fmt && just lint && just test` + smoke real
+  (`/health/ready` e, se mexeu em auth, login → me → refresh → logout).
+
+## Novo módulo
+
+1. Migration da tabela (dono: o módulo).
+2. `just migrate` e `just entities`.
+3. `dto.rs` (input/output + validação).
+4. `repository.rs` (queries).
+5. `service.rs` (só se houver regra).
+6. `controller.rs` (handlers + `router()`).
+7. Uma linha em `modules/mod.rs` (`nest`).
+8. Permissões novas no catálogo, se houver.
+9. Testes unitários + integração.
+10. OpenAPI e `docs/` atualizados.
+
+Se não couber em uma pasta, o módulo está grande demais.
+
+## Definition of Done
+
+- [ ] Migration + entidade gerada
+- [ ] DTO com validação
+- [ ] Repository com índice para os filtros usados
+- [ ] Service com transação quando necessário
+- [ ] Controller + rota + `router()`
+- [ ] Permissão checada (se protegida)
+- [ ] Idempotência definida (quando `POST`)
+- [ ] Erros mapeados para Problem Details
+- [ ] Testes unitários e de integração
+- [ ] Sem `unwrap`, sem segredo em log
+- [ ] `just ci` verde
+- [ ] OpenAPI/docs atualizados
+
+## Antipadrões
+
+- `utils.rs` genérico; trait ou repositório genérico; container de DI.
+- `anyhow` em handler; `unwrap`/`expect` em request.
+- Middleware de auth onde o extractor resolve (mas use `require_session` em rota sensível).
+- Editar entidade gerada ou migration já aplicada.
+- SQL em tabela de outro módulo; ciclo entre módulos.
+- Retry sem idempotência; cache invalidado antes do commit.
+- Logar payload inteiro, token, senha ou dado pessoal.
+- Rodar servidor em foreground no chat.
+
+## Pare e pergunte
+
+- Mudança de schema ou de migration aplicada.
+- Dependência nova ou mudança de feature de crate.
+- Mudança em auth, permissões, JWT ou bootstrap.
+- Breaking change de API.
+- Mudança de configuração/segredo, portas ou deploy.
+- Exclusão de dados ou operação irreversível.
+
+## Armadilhas conhecidas
+
+- `jsonwebtoken` 12 exige a feature `rust_crypto` (já configurada).
+- `GETDEL` exige Redis ≥ 6.2 (usamos 8).
+- `just entities` **sobrescreve** `src/database/entity/`.
+- Receitas do `just` não aceitam `:` no nome (`admin-create`, não `admin:create`).
+- `.env` só é carregado no perfil `development`.
+- API e worker validam a configuração; `migrator` e `admin` usam `load_unvalidated`.
+- Portas do host: **55432** (Postgres) e **56379** (Redis).
+- Entidade usa `DateTimeWithTimeZone`; converta para `Utc` no DTO.
+
+## Git
+
+- Commits pequenos, no imperativo; um assunto por commit.
+- Não commitar `.env`, `target/`, segredo ou dado de teste.
+- PR descreve contrato, migration, risco e como testar.
+
+## Diagnóstico
+
+- `GET /health` (liveness) e `GET /health/ready` (Postgres + Redis).
+- `just doctor` e `docker compose ps`.
+- Logs: `docker compose logs` (infra) e o log da API; nunca despeje o arquivo inteiro.
+- Erro 500 só devolve mensagem genérica; o detalhe está no log com `x-request-id`.
+
+## Links
+
+- `docs/architecture.md` — desenho e decisões de arquitetura.
+- `docs/adding-a-module.md` — tutorial passo a passo.
+- `docs/security.md` — auth, segredos e hardening.
+- `docs/testing.md` — estratégia de testes.
+- `docs/decisions.md` — registro de decisões (ADRs curtos).

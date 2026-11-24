@@ -6,6 +6,15 @@ com JWT próprio, OpenAPI, cron em worker separado e configuração em camadas.
 Arquitetura: **monólito modular por feature** — uma única API (`/api/v1`) + um worker,
 módulos donos das suas rotas/regras/tabelas e um `core` fino de infraestrutura.
 
+> **Trabalhando no projeto (pessoa ou agente)?** Leia o
+> [`AGENTS.md`](AGENTS.md): regras duras, comandos e checklists. O "porquê" está
+> em [`docs/`](docs/):
+> [arquitetura](docs/architecture.md) ·
+> [adicionar módulo](docs/adding-a-module.md) ·
+> [segurança](docs/security.md) ·
+> [testes](docs/testing.md) ·
+> [decisões](docs/decisions.md).
+
 ## Pré-requisitos (máquina do dev)
 
 | Ferramenta | Obrigatória | Observação |
@@ -135,6 +144,13 @@ src/
 │   └── users/              # dono da tabela users
 ├── jobs/                   # registro dos jobs (fase 6)
 └── routes/                 # só faz nest dos routers
+
+docs/                       # o "porquê" (AGENTS.md é o contrato)
+├── architecture.md
+├── adding-a-module.md
+├── security.md
+├── testing.md
+└── decisions.md
 ```
 
 ## Fases
@@ -148,7 +164,7 @@ src/
 | 4 | `users` como módulo-referência (CRUD admin) + OpenAPI | ⬜ |
 | 5 | Cache Redis no `users` | ⬜ |
 | 6 | Worker + cron | ⬜ |
-| 7 | Testes de integração, métricas, rate limit, Dockerfile, docs | ⬜ |
+| 7 | Testes de integração, métricas, rate limit, Dockerfile | ⬜ |
 
 ## Padrões
 
