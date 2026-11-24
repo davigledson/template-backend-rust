@@ -111,6 +111,18 @@ armazenado ainda bate com o do banco. No access token, quem garante é
 - Dependência nova: mantida, licença permitida, features mínimas e `cargo deny`
   verde.
 
+## E-mail e outbox
+
+- A senha nunca vai em e-mail, nem em template. O `welcome` não contém a senha.
+- No provider `log`, o destinatário é mascarado (`a***@dominio`); assunto e
+  remetente aparecem, corpo não.
+- O corpo do e-mail fica no banco (`email_outbox`) até 30 dias depois do envio;
+  não grave segredo, token ou dado sensível nele.
+- `APP__MAIL__SMTP_URL` contém credenciais e é redigida no `Debug`; só no
+  ambiente.
+- O worker entrega at-least-once: não use e-mail como confirmação única de
+  operação financeira sem chave de idempotência no provedor.
+
 ## Superfície HTTP
 
 Já configurado em `core/http.rs` e `config`:

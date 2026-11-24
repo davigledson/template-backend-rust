@@ -240,3 +240,40 @@ checklists. O "porquê" vai para `docs/`.
 
 **Consequência**: agente e pessoa seguem o mesmo padrão; documentação profunda
 continua existindo, mas não bloqueia o dia a dia.
+
+---
+
+## 2026-11-24 — Cache de leitura sob demanda (fase 5 cancelada)
+
+**Contexto**: o plano previa cache Redis no `users`. Não existe caminho quente
+medido; o CRUD admin é de baixo volume e o Postgres responde em poucos ms.
+
+**Decisão**: não implementar cache de leitura agora. O Redis fica justificado
+por refresh token (fase 3), rate limit de login e idempotência (fase 7). Cache
+entra por módulo, apenas com medição que mostre o banco no caminho crítico.
+
+**Consequência**: menos invalidação e menos estado para errar. Se o cache voltar,
+a chave leva prefixo de ambiente e a invalidação acontece **depois** do commit;
+Redis fora do ar deve degradar para o banco, nunca derrubar a leitura.
+
+---
+
+## 2026-11-24 — E-mail transacional por outbox no Postgres
+
+**Contexto**: criar usuário e enviar e-mail são operações que não compartilham
+transação. Publicar em fila depois do commit cria a janela "commitou e não
+enfileirou"; enviar antes pode mandar e-mail de usuário que não existe.
+
+**Decisão**: gravar a intenção em `email_outbox` na **mesma transação** da
+mudança de negócio. O worker lê com `FOR UPDATE SKIP LOCKED`, envia atrás da
+trait `Mailer` (`log` ou `smtp`) e marca `sent`, `pending` (retry com backoff) ou
+`failed`. `dedupe_key` única evita linha duplicada; lease de 5 min recupera item
+preso em `processing`.
+
+**Alternativas descartadas**: fila no Redis (exigiria AOF e política de memória
+adequada, hoje `allkeys-lru` sem persistência); envio no request (acopla
+latência e perda ao caminho HTTP).
+
+**Consequência**: entrega at-least-once, sem perda em restart; exige limpeza de
+`sent` antigos (job diário) e tolerância a duplicata no provedor. Para métrica e
+log, outbox é exagero: use `tokio::spawn` ou um job direto.

@@ -9,9 +9,9 @@ Este documento explica o **porquê** do desenho. As regras operacionais estão n
 cliente HTTP ──► api (Axum) ──► modules/<feature> ──► core (infra)
                                     │
                                     ├──► PostgreSQL (SeaORM)
-                                    └──► Redis (cache + refresh tokens)
+                                    └──► Redis (refresh tokens, rate limit)
 
-cron ─────────► worker (mesmo código, sem HTTP)
+cron ─────────► worker (mesmo código, sem HTTP) ──► email_outbox ──► SMTP
 ```
 
 - **Um binário de API** expõe tudo em `/api/v1`.
@@ -30,6 +30,7 @@ O sistema é um monólito, mas organizado por **feature**, não por camada técn
 ```text
 src/modules/auth/      dono de login/refresh/logout/me
 src/modules/users/     dono da tabela users
+src/modules/email/     dono da tabela email_outbox e dos templates
 src/core/              infraestrutura compartilhada
 ```
 
@@ -74,9 +75,9 @@ routes ──► modules/<feature> ──► core
 Proibido: `core` importar `modules`, um módulo importar o controller de outro, e
 ciclos (`auth → users` pode; `users → auth` não).
 
-O `AppState` carrega `db`, `cache`, `jwt` e `config`; os serviços recebem só o
-que precisam (`&state.db`, `&state.cache`), o que os deixa testáveis sem subir a
-aplicação inteira.
+O `AppState` carrega `db`, `cache`, `jwt`, `mailer` e `config`; os serviços recebem
+só o que precisam (`&state.db`, `&state.cache`), o que os deixa testáveis sem
+subir a aplicação inteira.
 
 ## Ciclo de uma requisição
 
@@ -126,9 +127,10 @@ boot.
 
 - **PostgreSQL** é a fonte da verdade. SeaORM mapeia tabelas em
   `database/entity/` (gerado por `just entities`).
-- **Redis** guarda dados efêmeros: refresh tokens e (na fase 5) cache de leitura.
-  Redis fora do ar degrada a experiência, não corrompe dados.
-- Migrations ficam no crate (`src/migrations/`) e rodam por comando explícito
+- **Redis** guarda dados efêmeros: refresh tokens e, na fase 7, rate limit de
+  login. Redis fora do ar degrada a experiência, não corrompe dados. Cache de
+  leitura fica para quando houver um caminho quente medido (ver ADR).
+- **Migrations** ficam no crate (`src/migrations/`) e rodam por comando explícito
   (`just migrate`), nunca no boot da API. Isso evita corrida entre réplicas e
   mantém o boot rápido e previsível.
 
@@ -148,6 +150,45 @@ Detalhes de ameaça e decisão estão em [`security.md`](security.md). Em resumo
   e invalida refresh tokens e sessões sensíveis imediatamente.
 - Autorização por **permissão** (`auth.require(USERS_WRITE)`), não por `if role
   == "admin"`. Assim, adicionar um papel novo não exige caçar comparações.
+
+## E-mail e worker
+
+O envio de e-mail é assíncrono por **transactional outbox**, não por fila:
+
+```text
+users::service::create
+  BEGIN
+    INSERT users
+    INSERT email_outbox (pending, dedupe_key)
+  COMMIT
+
+worker (tokio-cron-scheduler)
+  a cada 15 s: SELECT ... FOR UPDATE SKIP LOCKED → Mailer::send
+  diário 03:00: remove e-mails `sent` com mais de 30 dias
+```
+
+Por que outbox no Postgres:
+
+- o commit do negócio e a intenção de enviar são atômicos; não existe janela
+  "usuário criado, e-mail perdido";
+- `FOR UPDATE SKIP LOCKED` permite mais de um worker sem bloqueio mútuo;
+- não exige mudar a persistência do Redis (hoje configurado como cache, com
+  `allkeys-lru` e sem AOF), que poderia descartar mensagens;
+- o volume de e-mail de um projeto novo cabe folgado em polling de 15 s.
+
+O contrato é **at-least-once**: `dedupe_key` evita linha duplicada, mas o provedor
+pode receber o mesmo e-mail duas vezes se o worker cair entre o envio e o
+`UPDATE`. O envio é idempotente por natureza para convite/reset.
+
+O worker só roda quando `jobs.enabled = true`; ele não sobe HTTP nem valida o
+segredo JWT. `Mailer` (`core/mail.rs`) tem duas implementações:
+
+| Provider | Uso | Comportamento |
+|---|---|---|
+| `log` | desenvolvimento | registra remetente, destinatário mascarado e assunto |
+| `smtp` | produção | envia por SMTP/TLS via `lettre` |
+
+O endereço completo nunca vai para o log no provider `log`.
 
 ## Por que não Keycloak
 

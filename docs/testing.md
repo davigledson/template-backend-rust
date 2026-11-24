@@ -65,7 +65,15 @@ Dependências já no `Cargo.toml`: `axum-test`, `testcontainers` 0.27 e
 `testcontainers-modules` 0.15 (`postgres`, `redis`). O exemplo real é
 `tests/users_flow.rs`: sobe Postgres 18 e Redis 8, aplica migrations, cria o
 admin e percorre criação, listagem, autorização, troca de papel, soft delete,
-reset de senha e OpenAPI.
+reset de senha, outbox de e-mail e OpenAPI.
+
+O bloco de outbox prova as garantias:
+
+- criar usuário grava `welcome` na mesma transação;
+- `process_pending` envia e marca `sent`;
+- `dedupe_key` repetida não cria segunda linha;
+- falha do `Mailer` volta para `pending` com `attempts` incrementado e
+  `last_error` preenchido.
 
 Esqueleto de um teste de auth:
 

@@ -10,7 +10,8 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 - **Uma API** (`/api/v1`) + um **worker** de cron, do mesmo código.
 - **Monólito modular por feature**: `modules/<feature>` é dono das suas rotas,
   regras e tabelas; `core` é infraestrutura compartilhada.
-- Escopo atual: `users` + autenticação. Sem CRUD genérico e sem Keycloak.
+- Escopo atual: `users` + autenticação + e-mail transacional (outbox). Sem CRUD
+  genérico e sem Keycloak.
 - Alvo de deploy: 2 vCPU / 2 GB (API + Postgres + Redis no mesmo host).
 
 ## Antes de começar
@@ -47,10 +48,11 @@ src/
 ├── app.rs             estado + rotas + camadas HTTP
 ├── bin/               admin, migrator, worker
 ├── config/            settings.rs (figment)
-├── core/              auth, cache, erro, http, response, health, state
+├── core/              auth, cache, mail, erro, http, response, health, state
 ├── database/          connection + entity (gerada)
 ├── migrations/        migrations in-crate
-├── modules/           auth, users
+├── modules/           auth, email, users
+├── jobs/              scheduler do worker
 └── routes/            só faz nest
 ```
 
@@ -73,7 +75,9 @@ routes → modules/<feature> → core
 - **Segredo nunca** em TOML, log ou commit. Use `APP__*`/`.env` (só dev).
 - **Validação no DTO**, antes do service (`ValidatedJson`/`ValidatedQuery` → 422
   em Problem Details). Repository não valida.
-- **Transação curta**; efeitos externos (e-mail, webhook) depois do commit.
+- **Transação curta**; efeito externo (e-mail, webhook) nunca dentro dela. Para
+  e-mail, grave a intenção em `email_outbox` na mesma transação e deixe o worker
+  enviar depois do commit.
 - **Sem `utils.rs`.** Helper sem dono vai para `core::<tema>`; com dono, fica no módulo.
 - **Sem repositório genérico** e sem container de DI: `AppState` + `Arc` bastam.
 - **Sem emoji** em código, README, `AGENTS.md`, docs ou mensagens de commit.
@@ -106,6 +110,19 @@ Passou disso, quebre por sub-recurso — não crie camada nova.
 - Primeiro admin **só por CLI** (`just admin-create`). Nunca rota pública nem seed
   com senha.
 - Access token: 15 min. Refresh: opaco, hasheado no Redis, rotação com `GETDEL`.
+
+## E-mail e jobs
+
+- `modules/email` é dono de `email_outbox`; outro módulo chama
+  `email::service::enqueue` **dentro da sua transação**, nunca envia direto.
+- `dedupe_key` é única por evento (`user-created:<id>`); repetir não duplica.
+- Envio fica atrás da trait `Mailer` em `core/mail.rs`: `log` (dev) ou `smtp`.
+  Nunca logar corpo nem endereço completo no provider `log`.
+- O worker (`src/jobs/`) só roda com `jobs.enabled = true`; job novo entra em
+  `jobs::run`, com duração logada e sem segurar o tick.
+- Entrega é at-least-once: o consumidor/provedor precisa tolerar duplicata.
+- Limpeza de `sent` antigos é job diário; não apague `pending`/`failed` sem
+  inspeção.
 
 ## Banco e migrations
 
@@ -214,6 +231,11 @@ Se não couber em uma pasta, o módulo está grande demais.
 - API e worker validam a configuração; `migrator` e `admin` usam `load_unvalidated`.
 - Portas do host: **55432** (Postgres) e **56379** (Redis).
 - Entidade usa `DateTimeWithTimeZone`; converta para `Utc` no DTO.
+- `email_outbox` usa `FOR UPDATE SKIP LOCKED`; o worker roda a cada 15 s e o
+  lease de `processing` é 5 min.
+- Redis é cache/fila de estado com `allkeys-lru` e sem AOF: **não** use como
+  transporte durável de e-mail.
+- `just worker` só processa algo com `jobs.enabled = true` e infra no ar.
 
 ## Git
 
@@ -232,6 +254,6 @@ Se não couber em uma pasta, o módulo está grande demais.
 
 - `docs/architecture.md` — desenho e decisões de arquitetura.
 - `docs/adding-a-module.md` — tutorial passo a passo.
-- `docs/security.md` — auth, segredos e hardening.
+- `docs/security.md` — auth, e-mail, segredos e hardening.
 - `docs/testing.md` — estratégia de testes.
 - `docs/decisions.md` — registro de decisões (ADRs curtos).

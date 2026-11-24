@@ -1,7 +1,8 @@
 # template-backend-rust
 
 Template de backend em **Rust** para projetos novos: Axum + SeaORM + PostgreSQL + Redis,
-com JWT próprio, OpenAPI, cron em worker separado e configuração em camadas.
+com JWT próprio, OpenAPI, e-mail transacional por *outbox*, cron em worker separado
+e configuração em camadas.
 
 Arquitetura: **monólito modular por feature** — uma única API (`/api/v1`) + um worker,
 módulos donos das suas rotas/regras/tabelas e um `core` fino de infraestrutura.
@@ -57,7 +58,7 @@ just dev                      # API em http://localhost:8080
 | `just doctor` | versões, estado dos containers e do `.env` |
 | `just up` / `just down` / `just reset` | infra (reset apaga volumes) |
 | `just dev` | API com logs legíveis |
-| `just worker` | processo de cron |
+| `just worker` | entrega do outbox de e-mail e limpeza (cron) |
 | `just migrate` | migrations pendentes |
 | `just admin-create <email> "<nome>" [true]` | cria o primeiro admin (ou outro com `true`) |
 | `just admin-promote <email>` | promove usuário existente a admin |
@@ -78,6 +79,17 @@ Precedência (do menor para o maior):
 
 Segredos nunca ficam em TOML. `APP__JWT__SECRET` é obrigatório e precisa ter
 no mínimo 32 caracteres (validado no boot).
+
+E-mail:
+
+| Chave | Padrão | O que faz |
+|---|---|---|
+| `mail.provider` | `log` | `log` registra o envio sem enviar; `smtp` envia de verdade |
+| `mail.from` | `nao-responda@example.com` | remetente |
+| `mail.smtp_url` | vazio | obrigatório com `provider = smtp` (ex.: `smtps://user:senha@host:465`) |
+
+Em desenvolvimento use `log`; a senha do SMTP fica só no ambiente
+(`APP__MAIL__SMTP_URL`) e é redigida no `Debug` da configuração.
 
 ## Endpoints de infraestrutura
 
@@ -138,6 +150,38 @@ Proteções:
 - `PATCH` usa `version` para concorrência otimista (409 se alguém alterou antes);
 - `DELETE` repetido devolve `204` (idempotente).
 
+## E-mail transacional (outbox)
+
+O envio de e-mail nunca acontece no caminho da requisição. A intenção é gravada
+na **mesma transação** da mudança de negócio, na tabela `email_outbox`:
+
+```text
+BEGIN
+  INSERT INTO users ...
+  INSERT INTO email_outbox (status = 'pending', dedupe_key = 'user-created:<id>')
+COMMIT
+
+worker (a cada 15 s)
+  SELECT ... FOR UPDATE SKIP LOCKED
+  -> envia
+  -> sent | pending (retry) | failed
+```
+
+- **Não perde**: se o processo cair entre o commit e o envio, a linha continua
+  `pending` e o worker tenta de novo.
+- **Não duplica a linha**: `dedupe_key` é única por evento.
+- **Entrega at-least-once**: o envio precisa ser idempotente do lado do provedor.
+- **Retry**: 5 tentativas com backoff exponencial (1, 2, 4, 8, 16 min).
+- **Limpeza**: e-mails `sent` com mais de 30 dias são removidos pelo cron diário.
+- **Lease**: item em `processing` há mais de 5 min volta a ser elegível.
+
+Eventos já ligados ao outbox: usuário criado (`users::service::create`, inclusive
+pelo CLI) e senha alterada. O envio real fica atrás da trait `Mailer`
+(`core::mail`), com implementações `log` e `smtp`.
+
+> Um projeto novo deve enviar só o que é problema de negócio perder: convite,
+> reset de senha, confirmação de pagamento. Métrica e log não precisam de outbox.
+
 ## Estrutura
 
 ```text
@@ -154,6 +198,7 @@ src/
 │   ├── cache.rs            # pool Redis + ping
 │   ├── error.rs            # AppError → Problem Details
 │   ├── extract.rs          # ValidatedJson / ValidatedQuery
+│   ├── mail.rs             # trait Mailer: log e smtp
 │   ├── openapi.rs          # schema do Problem
 │   ├── response.rs         # Page<T> / PageQuery
 │   ├── http.rs             # trace, cors, compress, timeout, request-id
@@ -164,8 +209,9 @@ src/
 ├── migrations/             # in-crate (sea-orm-migration)
 ├── modules/
 │   ├── auth/               # login, refresh, logout, me
+│   ├── email/              # outbox + templates; dono da tabela email_outbox
 │   └── users/              # dono da tabela users + CRUD admin
-├── jobs/                   # registro dos jobs (fase 6)
+├── jobs/                   # scheduler do worker: outbox + limpeza
 └── routes/
     ├── mod.rs              # monta health + módulos + docs
     └── openapi.rs          # /docs e /api-docs/openapi.json
@@ -189,9 +235,9 @@ docs/                       # o "porquê" (AGENTS.md é o contrato)
 | 2 | Migration `users`, entidade e migrator | ok |
 | 3 | Auth JWT (login/refresh/logout/me) + bootstrap admin | ok |
 | 4 | `users` como módulo-referência (CRUD admin) + OpenAPI | ok |
-| 5 | Cache Redis no `users` | pendente |
-| 6 | Worker + cron | pendente |
-| 7 | Testes de integração, métricas, rate limit, Dockerfile | pendente |
+| 5 | Cache Redis no `users` | cancelada (ADR) |
+| 6 | Worker + cron + e-mail por outbox | ok |
+| 7 | Rate limit, métricas, Dockerfile, snapshot OpenAPI | pendente |
 
 ## Padrões
 
