@@ -51,7 +51,7 @@ src/
 ├── main.rs            binário api
 ├── app.rs             estado + rotas + camadas HTTP
 ├── bin/               admin, migrator, worker
-├── config/            settings.rs (figment)
+├── config/            settings/ (figment, uma seção por arquivo)
 ├── core/              auth, cache, client_ip, idempotency, mail, metrics,
 │                      erro, http, response, health, state
 ├── database/          connection + entity (gerada)
@@ -102,7 +102,13 @@ routes → modules/<feature> → core
 `service.rs` é opcional em CRUD puro; regra ou transação exige service.
 
 Alvos de tamanho: controller ≤120, service ≤150, repository ≤150, dto ≤80 linhas.
-Passou disso, quebre por sub-recurso — não crie camada nova. `modules/users` é o
+Passou disso, quebre por sub-recurso — não crie camada nova.
+
+Configuração segue a mesma ideia: `config/settings/<chave>.rs` com o mesmo nome
+da chave no TOML (`server`, `database`, `redis`, `rate_limit`, `jwt`, `mail`,
+`jobs`, `log`, `cors`). Cada arquivo tem o tipo, o `Default`, os helpers
+derivados e `collect_errors`; o `mod.rs` só monta o `Settings` e o agregado de
+validação. Não engorde o `mod.rs`. `modules/users` é o
 exemplo: `controller/{collection,item,password}.rs`,
 `service/{lookup,create,update,deactivate,credentials,profile,session,rules}.rs`
 e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.

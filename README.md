@@ -282,7 +282,7 @@ src/
 │   ├── worker.rs           # cron
 │   ├── migrator.rs         # migrations
 │   └── admin.rs            # bootstrap de admin
-├── config/settings.rs      # figment + validação no boot
+├── config/settings/        # uma seção por arquivo + validação no boot
 ├── core/
 │   ├── auth/               # role, permission, jwt, password, extractor
 │   ├── cache.rs            # pool Redis + ping
