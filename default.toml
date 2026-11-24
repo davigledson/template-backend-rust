@@ -30,6 +30,13 @@ access_ttl_min = 15
 refresh_ttl_days = 7
 # secret vem de APP__JWT__SECRET (mínimo 32 caracteres), validado no boot.
 
+[mail]
+# `log` só registra o envio (desenvolvimento); `smtp` envia de verdade.
+provider = "log"
+from = "nao-responda@example.com"
+# URL do SMTP: APP__MAIL__SMTP_URL (ex.: smtps://user:senha@host:465).
+smtp_url = ""
+
 [jobs]
 enabled = true
 timezone = "America/Sao_Paulo"

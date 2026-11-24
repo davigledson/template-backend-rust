@@ -4,6 +4,7 @@ pub mod error;
 pub mod extract;
 pub mod health;
 pub mod http;
+pub mod mail;
 pub mod openapi;
 pub mod response;
 pub mod shutdown;

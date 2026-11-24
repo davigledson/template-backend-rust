@@ -1,8 +1,8 @@
 //! Queries da tabela `users`. Só este módulo escreve nela.
 
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, Condition, DatabaseConnection, DbErr, EntityTrait, ExprTrait,
-    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, sea_query::Expr,
+    ActiveModelTrait, ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DbErr,
+    EntityTrait, ExprTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, sea_query::Expr,
 };
 use uuid::Uuid;
 
@@ -11,18 +11,24 @@ use crate::{
     database::entity::users::{self, ActiveModel, Column, Entity},
 };
 
-pub async fn find_by_id(db: &DatabaseConnection, id: Uuid) -> Result<Option<users::Model>, DbErr> {
+pub async fn find_by_id<C>(db: &C, id: Uuid) -> Result<Option<users::Model>, DbErr>
+where
+    C: ConnectionTrait,
+{
     Entity::find_by_id(id).one(db).await
 }
 
-pub async fn find_by_email(
-    db: &DatabaseConnection,
-    email: &str,
-) -> Result<Option<users::Model>, DbErr> {
+pub async fn find_by_email<C>(db: &C, email: &str) -> Result<Option<users::Model>, DbErr>
+where
+    C: ConnectionTrait,
+{
     Entity::find().filter(Column::Email.eq(email)).one(db).await
 }
 
-pub async fn insert(db: &DatabaseConnection, user: ActiveModel) -> Result<users::Model, DbErr> {
+pub async fn insert<C>(db: &C, user: ActiveModel) -> Result<users::Model, DbErr>
+where
+    C: ConnectionTrait,
+{
     user.insert(db).await
 }
 
@@ -111,11 +117,10 @@ pub async fn update(
     query.exec(db).await.map(|result| result.rows_affected)
 }
 
-pub async fn count_by_email(
-    db: &DatabaseConnection,
-    email: &str,
-    excluding: Uuid,
-) -> Result<u64, DbErr> {
+pub async fn count_by_email<C>(db: &C, email: &str, excluding: Uuid) -> Result<u64, DbErr>
+where
+    C: ConnectionTrait,
+{
     Entity::find()
         .filter(Column::Email.eq(email))
         .filter(Column::Id.ne(excluding))
@@ -137,11 +142,10 @@ pub async fn set_role(db: &DatabaseConnection, id: Uuid, role: Role) -> Result<u
 }
 
 /// Atualiza a senha e invalida sessões (`token_version`).
-pub async fn set_password(
-    db: &DatabaseConnection,
-    id: Uuid,
-    password_hash: &str,
-) -> Result<u64, DbErr> {
+pub async fn set_password<C>(db: &C, id: Uuid, password_hash: &str) -> Result<u64, DbErr>
+where
+    C: ConnectionTrait,
+{
     Entity::update_many()
         .col_expr(Column::PasswordHash, Expr::value(password_hash))
         .col_expr(Column::TokenVersion, Expr::col(Column::TokenVersion).add(1))

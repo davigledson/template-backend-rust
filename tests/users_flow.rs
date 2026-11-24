@@ -3,20 +3,29 @@
 //! Um único teste mantém os containers vivos e executa o fluxo completo em
 //! ordem. Os testes unitários cobrem as regras puras (último admin etc.).
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use sea_orm::Database;
+use sea_orm::{ColumnTrait, Database, EntityTrait, PaginatorTrait, QueryFilter};
 use sea_orm_migration::MigratorTrait;
 use serde_json::{Value, json};
 use template_backend_rust::{
     app,
     config::settings::Settings,
     core::auth::role::Role,
-    core::{auth::jwt::JwtService, cache::Cache, state::AppState},
+    core::{
+        auth::jwt::JwtService,
+        cache::Cache,
+        mail::{self, EmailMessage, Mailer, MailerError},
+        state::AppState,
+    },
+    database::entity::email_outbox::{Column as OutboxColumn, Entity as Outbox},
     migrations::Migrator,
-    modules::users::service::{self as users_service, NewUser},
+    modules::{
+        email::service as email_service,
+        users::service::{self as users_service, NewUser},
+    },
 };
 use testcontainers::{ImageExt, runners::AsyncRunner};
 use testcontainers_modules::{postgres::Postgres, redis::Redis};
@@ -57,6 +66,7 @@ async fn fluxo_completo_de_usuarios() {
         .await
         .expect("conexão com o postgres");
     Migrator::up(&db, None).await.expect("migrations");
+    let db_check = db.clone();
 
     users_service::create(
         &db,
@@ -72,10 +82,12 @@ async fn fluxo_completo_de_usuarios() {
 
     let cache = Cache::connect(&settings.redis).expect("cache");
     let jwt = JwtService::new(&settings.jwt).expect("jwt");
+    let mailer = mail::from_settings(&settings.mail).expect("mailer");
     let server = TestServer::new(app::build(AppState::new(
         db,
         cache,
         jwt,
+        mailer,
         Arc::new(settings),
     )));
 
@@ -259,6 +271,86 @@ async fn fluxo_completo_de_usuarios() {
         .await;
     empty_patch.assert_status(StatusCode::BAD_REQUEST);
 
+    // --- outbox de e-mail ---
+    let pending = Outbox::find()
+        .filter(OutboxColumn::Status.eq("pending"))
+        .count(&db_check)
+        .await
+        .expect("contagem do outbox");
+    assert_eq!(pending, 3, "admin + ana + aviso de senha");
+
+    let recording = RecordingMailer::default();
+    let summary = email_service::process_pending(&db_check, &recording, 10)
+        .await
+        .expect("processar outbox");
+    assert_eq!(summary.claimed, 3);
+    assert_eq!(summary.sent, 3);
+    assert_eq!(summary.failed, 0);
+
+    let subjects: Vec<String> = recording
+        .sent
+        .lock()
+        .expect("lock")
+        .iter()
+        .map(|message| message.subject.clone())
+        .collect();
+    assert_eq!(
+        subjects
+            .iter()
+            .filter(|subject| *subject == "Sua conta foi criada")
+            .count(),
+        2
+    );
+    assert!(
+        subjects
+            .iter()
+            .any(|subject| subject == "Sua senha foi alterada")
+    );
+
+    let sent = Outbox::find()
+        .filter(OutboxColumn::Status.eq("sent"))
+        .count(&db_check)
+        .await
+        .expect("enviados");
+    assert_eq!(sent, 3);
+
+    // Deduplicação pelo dedupe_key.
+    let message = EmailMessage {
+        to: "dedupe@teste.local".to_owned(),
+        subject: "Teste".to_owned(),
+        body: "corpo".to_owned(),
+    };
+    email_service::enqueue(&db_check, message.clone(), "manual-dedupe".to_owned())
+        .await
+        .expect("primeiro enqueue");
+    email_service::enqueue(&db_check, message, "manual-dedupe".to_owned())
+        .await
+        .expect("segundo enqueue");
+
+    let deduped = Outbox::find()
+        .filter(OutboxColumn::DedupeKey.eq("manual-dedupe"))
+        .count(&db_check)
+        .await
+        .expect("dedupe");
+    assert_eq!(deduped, 1);
+
+    // Falha de envio reagenda com backoff e incrementa attempts.
+    let summary = email_service::process_pending(&db_check, &FailingMailer, 10)
+        .await
+        .expect("processar com falha");
+    assert_eq!(summary.claimed, 1);
+    assert_eq!(summary.retried, 1);
+
+    let manual = Outbox::find()
+        .filter(OutboxColumn::DedupeKey.eq("manual-dedupe"))
+        .one(&db_check)
+        .await
+        .expect("buscar manual")
+        .expect("manual existe");
+    assert_eq!(manual.status, "pending");
+    assert_eq!(manual.attempts, 1);
+    assert!(manual.last_error.is_some());
+
     // --- documentação ---
     let spec: Value = server.get("/api-docs/openapi.json").await.json();
     assert!(spec["paths"]["/api/v1/users"].is_object());
@@ -285,4 +377,26 @@ async fn login(server: &TestServer, email: &str, password: &str) -> String {
         .as_str()
         .expect("access token")
         .to_owned()
+}
+
+#[derive(Default)]
+struct RecordingMailer {
+    sent: Mutex<Vec<EmailMessage>>,
+}
+
+#[async_trait::async_trait]
+impl Mailer for RecordingMailer {
+    async fn send(&self, message: &EmailMessage) -> Result<(), MailerError> {
+        self.sent.lock().expect("lock").push(message.clone());
+        Ok(())
+    }
+}
+
+struct FailingMailer;
+
+#[async_trait::async_trait]
+impl Mailer for FailingMailer {
+    async fn send(&self, _message: &EmailMessage) -> Result<(), MailerError> {
+        Err(MailerError::Transport("falha simulada".to_owned()))
+    }
 }

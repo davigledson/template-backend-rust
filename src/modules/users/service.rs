@@ -3,7 +3,7 @@
 //! É a porta pública para os outros módulos (ex.: `auth` busca usuário aqui).
 
 use chrono::Utc;
-use sea_orm::{DatabaseConnection, DbErr, Set};
+use sea_orm::{DatabaseConnection, DbErr, Set, TransactionTrait};
 use uuid::Uuid;
 
 use crate::{
@@ -12,7 +12,10 @@ use crate::{
         error::AppError,
     },
     database::entity::users,
-    modules::users::{dto::ListUsersQuery, repository},
+    modules::{
+        email::{service as email_service, templates as email_templates},
+        users::{dto::ListUsersQuery, repository},
+    },
 };
 
 pub struct NewUser {
@@ -88,12 +91,15 @@ pub async fn create(db: &DatabaseConnection, input: NewUser) -> Result<users::Mo
     password::validate_strength(&input.password)
         .map_err(|error| AppError::BadRequest(error.to_string()))?;
 
-    if repository::find_by_email(db, &email).await?.is_some() {
+    let password_hash = password::hash(&input.password)?;
+    let now = Utc::now().fixed_offset();
+    let txn = db.begin().await?;
+
+    if repository::find_by_email(&txn, &email).await?.is_some() {
+        txn.rollback().await?;
         return Err(AppError::Conflict("e-mail já cadastrado".to_owned()));
     }
 
-    let password_hash = password::hash(&input.password)?;
-    let now = Utc::now().fixed_offset();
     let model = users::ActiveModel {
         id: Set(Uuid::now_v7()),
         name: Set(name.to_owned()),
@@ -107,13 +113,31 @@ pub async fn create(db: &DatabaseConnection, input: NewUser) -> Result<users::Mo
         updated_at: Set(now),
     };
 
-    match repository::insert(db, model).await {
-        Ok(model) => Ok(model),
+    let model = match repository::insert(&txn, model).await {
+        Ok(model) => model,
         Err(error) if is_unique_violation(&error) => {
-            Err(AppError::Conflict("e-mail já cadastrado".to_owned()))
+            txn.rollback().await?;
+            return Err(AppError::Conflict("e-mail já cadastrado".to_owned()));
         }
-        Err(error) => Err(AppError::Database(error)),
+        Err(error) => {
+            txn.rollback().await?;
+            return Err(AppError::Database(error));
+        }
+    };
+
+    if let Err(error) = email_service::enqueue(
+        &txn,
+        email_templates::welcome(&model.name, &model.email),
+        format!("user-created:{}", model.id),
+    )
+    .await
+    {
+        txn.rollback().await?;
+        return Err(error);
     }
+
+    txn.commit().await?;
+    Ok(model)
 }
 
 /// Atualização parcial feita por um administrador.
@@ -281,10 +305,30 @@ pub async fn set_password(
         .map_err(|error| AppError::BadRequest(error.to_string()))?;
 
     let password_hash = password::hash(new_password)?;
-    let updated = repository::set_password(db, id, &password_hash).await?;
+    let txn = db.begin().await?;
+
+    let updated = repository::set_password(&txn, id, &password_hash).await?;
     if updated == 0 {
+        txn.rollback().await?;
         return Err(AppError::NotFound("usuário não encontrado".to_owned()));
     }
+
+    let user = repository::find_by_id(&txn, id)
+        .await?
+        .ok_or_else(|| AppError::internal("usuário desapareceu após a troca de senha"))?;
+
+    if let Err(error) = email_service::enqueue(
+        &txn,
+        email_templates::password_changed(&user.name, &user.email),
+        format!("password-changed:{}:{}", user.id, user.token_version),
+    )
+    .await
+    {
+        txn.rollback().await?;
+        return Err(error);
+    }
+
+    txn.commit().await?;
     Ok(())
 }
 

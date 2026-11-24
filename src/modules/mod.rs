@@ -1,6 +1,7 @@
 //! Módulos de negócio. Cada um é dono das suas rotas, regras e tabelas.
 
 pub mod auth;
+pub mod email;
 pub mod users;
 
 use utoipa_axum::router::OpenApiRouter;

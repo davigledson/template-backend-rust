@@ -11,6 +11,7 @@ pub mod app;
 pub mod config;
 pub mod core;
 pub mod database;
+pub mod jobs;
 pub mod migrations;
 pub mod modules;
 pub mod routes;

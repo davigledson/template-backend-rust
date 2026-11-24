@@ -8,7 +8,8 @@ use template_backend_rust::{
     app,
     config::Settings,
     core::{
-        auth::jwt::JwtService, cache::Cache, error::AppError, shutdown, state::AppState, telemetry,
+        auth::jwt::JwtService, cache::Cache, error::AppError, mail, shutdown, state::AppState,
+        telemetry,
     },
     database::connection,
 };
@@ -66,7 +67,8 @@ async fn run(settings: Settings) -> Result<(), AppError> {
     let db = connection::connect(&config.database).await?;
     let cache = Cache::connect(&config.redis)?;
     let jwt = JwtService::new(&config.jwt)?;
-    let state = AppState::new(db, cache, jwt, Arc::clone(&config));
+    let mailer = mail::from_settings(&config.mail).map_err(AppError::internal)?;
+    let state = AppState::new(db, cache, jwt, mailer, Arc::clone(&config));
     let router = app::build(state);
 
     let address = format!("{}:{}", config.server.host, config.server.port);

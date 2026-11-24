@@ -1,12 +1,10 @@
-//! Binário do worker (cron).
-//!
-//! Fase 1: carrega configuração e logging. O scheduler entra na Fase 6.
+//! Binário do worker (cron): entrega de e-mails do outbox e limpeza.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::process::ExitCode;
 
-use template_backend_rust::{config::Settings, core::telemetry};
+use template_backend_rust::{config::Settings, core::telemetry, jobs};
 
 fn main() -> ExitCode {
     let settings = match Settings::load() {
@@ -22,12 +20,28 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
-    tracing::info!(
-        profile = %settings.profile,
-        timezone = %settings.jobs.timezone,
-        jobs_enabled = settings.jobs.enabled,
-        "worker pronto (sem jobs registrados — fase 6)"
-    );
+    let runtime = match build_runtime(&settings) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("falha ao criar o runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
 
-    ExitCode::SUCCESS
+    match runtime.block_on(jobs::run(settings)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!(error = %error, "worker encerrado com erro");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn build_runtime(settings: &Settings) -> Result<tokio::runtime::Runtime, std::io::Error> {
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.enable_all();
+    if let Some(workers) = settings.server.worker_threads() {
+        builder.worker_threads(workers);
+    }
+    builder.build()
 }
