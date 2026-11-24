@@ -12,6 +12,7 @@ cliente HTTP ──► api (Axum) ──► modules/<feature> ──► core (in
                                     └──► Redis (refresh tokens, rate limit)
 
 cron ─────────► worker (mesmo código, sem HTTP) ──► email_outbox ──► SMTP
+monitor ──────► /metrics (Prometheus, sem auth; restrinja no proxy)
 ```
 
 - **Um binário de API** expõe tudo em `/api/v1`.
@@ -84,8 +85,9 @@ subir a aplicação inteira.
 ```text
 TCP
  └─ camadas (core/http.rs): request-id → trace → cors → compress → timeout → body limit
-     └─ router /api/v1
-         └─ extractor (AuthUser, Json, Path, Query, Valid)
+     └─ IP do cliente (core/client_ip.rs) → métricas → idempotência
+         └─ router /api/v1
+             └─ extractor (AuthUser, ClientIp, Json, Path, Query, Valid)
              └─ controller
                  ├─ service (regra, transação)
                  │   └─ repository (SeaORM) ──► PostgreSQL / Redis
@@ -127,8 +129,9 @@ boot.
 
 - **PostgreSQL** é a fonte da verdade. SeaORM mapeia tabelas em
   `database/entity/` (gerado por `just entities`).
-- **Redis** guarda dados efêmeros: refresh tokens e, na fase 7, rate limit de
-  login. Redis fora do ar degrada a experiência, não corrompe dados. Cache de
+- **Redis** guarda dados efêmeros: refresh tokens (com família), rate limit de
+  login e respostas idempotentes. Redis fora do ar degrada a experiência
+  (rate limit e idempotência viram fail-open), não corrompe dados. Cache de
   leitura fica para quando houver um caminho quente medido (ver ADR).
 - **Migrations** ficam no crate (`src/migrations/`) e rodam por comando explícito
   (`just migrate`), nunca no boot da API. Isso evita corrida entre réplicas e
@@ -145,7 +148,7 @@ Detalhes de ameaça e decisão estão em [`security.md`](security.md). Em resumo
 - **Access token** JWT HS256, 15 min, validado por assinatura/expiração no
   extractor, sem ida ao banco.
 - **Refresh token** opaco, hasheado no Redis, rotacionado a cada uso
-  (`GETDEL`), 7 dias.
+  (script Lua com marcador de uso), 7 dias, ligado a uma família.
 - **`token_version`** no usuário: ao trocar senha/papel ou desativar, incrementa
   e invalida refresh tokens e sessões sensíveis imediatamente.
 - Autorização por **permissão** (`auth.require(USERS_WRITE)`), não por `if role
@@ -153,6 +156,44 @@ Detalhes de ameaça e decisão estão em [`security.md`](security.md). Em resumo
 - **Perfil próprio** (`PATCH /auth/me`, `PUT /auth/me/password`) usa
   `profile:write`; a troca de senha confere a senha atual e encerra todas as
   sessões via `token_version`.
+
+## Rate limit, idempotência e métricas
+
+Quatro camadas transversais, cada uma com um custo e uma decisão:
+
+| Camada | Onde | Decisão |
+|---|---|---|
+| IP do cliente | `core/client_ip.rs` | só confia em `X-Forwarded-For` com `server.trust_proxy_headers = true` |
+| Rate limit | `core/auth/rate_limit.rs` | janela fixa no Redis, por conta e IP; fail-open |
+| Idempotência | `core/idempotency.rs` | `Idempotency-Key` opcional; resposta 24 h; lock 60 s |
+| Métricas | `core/metrics.rs` | recorder global via `OnceLock`; `/metrics` fora da medição |
+
+O rate limit é aplicado no service de login, depois da validação do corpo e
+antes de consultar senha: e-mail inexistente e senha errada contam igual, sem
+enumeração. A chave usa SHA-256 do e-mail normalizado e do IP, então o Redis não
+guarda PII.
+
+A idempotência assina método, caminho, hash do `Authorization` e a chave. Isso
+impede que a mesma chave usada por outro usuário reproduza a resposta alheia.
+Repetir durante a primeira execução devolve `409`; resposta `5xx` não é gravada.
+
+## Observabilidade
+
+- Logs estruturados com `x-request-id`; 5xx genérico para o cliente.
+- `/metrics` expõe `axum_http_requests_total`, `..._duration_seconds` e
+  `..._pending` (axum-prometheus).
+- `worker` loga resumo e duração de cada job.
+- O endpoint de métricas não tem autenticação; restrinja na rede/proxy.
+
+## Deploy
+
+- `Dockerfile` multi-stage: build em `rust:1.99.1-slim`, runtime
+  `debian:bookworm-slim`, UID 10001.
+- `api` e `worker` usam a mesma imagem com comandos diferentes; `migrate` fica
+  no perfil `tools` do compose.
+- Migrations não rodam no boot: `docker compose --profile tools run --rm migrate`.
+- CI (`quality` + `docker`) cobre fmt, clippy, nextest, `cargo deny` e build da
+  imagem.
 
 ## E-mail e worker
 

@@ -144,7 +144,8 @@ registro.
 ## 2026-11-24 — Refresh opaco com rotação no Redis
 
 **Decisão**: refresh de 64 caracteres hex, guardado como SHA-256 com TTL de 7
-dias, consumido por `GETDEL` e reemitido a cada refresh.
+dias, consumido por script atômico com marcador de uso e reemitido a cada
+refresh (famílias entram em ADR posterior).
 
 **Consequência**: token vazado tem janela curta; reuso do antigo falha. Detecção
 de reuso com revogação de família fica para o hardening.
@@ -249,7 +250,8 @@ continua existindo, mas não bloqueia o dia a dia.
 medido; o CRUD admin é de baixo volume e o Postgres responde em poucos ms.
 
 **Decisão**: não implementar cache de leitura agora. O Redis fica justificado
-por refresh token (fase 3), rate limit de login e idempotência (fase 7). Cache
+por refresh token (fase 3), rate limit de login e idempotência (fase 7, ambos
+implementados). Cache
 entra por módulo, apenas com medição que mostre o banco no caminho crítico.
 
 **Consequência**: menos invalidação e menos estado para errar. Se o cache voltar,
@@ -292,3 +294,50 @@ emitido.
 **Consequência**: quem trocou a senha faz um login extra, mas uma sessão
 possivelmente comprometida não sobrevive à troca. O aviso de alteração entra no
 outbox na mesma transação.
+
+---
+
+## 2026-11-24 — Rate limit de login fail-open
+
+**Contexto**: bloquear login quando o Redis cai protege contra força bruta, mas
+transforma o cache em dependência crítica de disponibilidade.
+
+**Decisão**: limitar por conta (5 falhas) e por IP (20) em janela fixa de 15 min,
+com contadores hasheados no Redis. Se o Redis estiver indisponível, o login
+segue e o erro vai para o log; o proxy deve aplicar um limite por IP como
+segunda barreira.
+
+**Consequência**: indisponibilidade de cache não derruba a autenticação. Durante
+uma falha do Redis, a proteção fica reduzida ao proxy.
+
+---
+
+## 2026-11-24 — Famílias de refresh token
+
+**Contexto**: a rotação simples detecta token já consumido, mas não derruba as
+sessões derivadas dele. Um token roubado poderia ser usado antes de o legítimo
+rotacionar.
+
+**Decisão**: cada login cria uma família; a rotação mantém a família. O consumo
+é atômico e grava um marcador "já usado" com TTL de 7 dias. Reapresentar um
+token usado revoga a família inteira (`auth:refresh-family:<id>:revoked`), e
+todos os refreshes daquela família passam a falhar.
+
+**Consequência**: reuso derruba a sessão legítima junto, o que é o comportamento
+desejado. Um novo login cria outra família e não é afetado.
+
+---
+
+## 2026-11-24 — Idempotência opcional por `Idempotency-Key`
+
+**Contexto**: `POST` sem ID natural pode duplicar em retry de rede. Exigir a
+chave em todo `POST` quebraria clientes simples e o próprio login.
+
+**Decisão**: quando o cabeçalho existe, a primeira resposta é gravada por 24 h
+(status, `content-type` e corpo) no Redis, com assinatura que inclui método,
+caminho e hash do `Authorization`. Repetição durante a execução recebe `409`.
+Sem o cabeçalho, o comportamento é o normal. Redis fora do ar é fail-open.
+
+**Consequência**: retry seguro fica a cargo do cliente, mas o template oferece o
+mecanismo pronto. A resposta gravada não pode conter segredo além do que o
+próprio endpoint já devolve.

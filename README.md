@@ -65,8 +65,11 @@ just dev                      # API em http://localhost:8080
 | `just admin-reset-password <email>` | redefine a senha e invalida as sessões |
 | `just test` | testes unitários + integração |
 | `just fmt` / `just lint` / `just check` | qualidade |
+| `just openapi-check` | snapshot do contrato OpenAPI |
+| `just deny` | licenças, advisories e fontes das dependências |
 | `just entities` | gera entidades a partir do banco |
-| `just ci` | pipeline local equivalente ao CI |
+| `just docker-build` | imagem de produção multi-stage |
+| `just ci` | fmt + lint + check + test + deny |
 
 ## Configuração
 
@@ -91,6 +94,19 @@ E-mail:
 Em desenvolvimento use `log`; a senha do SMTP fica só no ambiente
 (`APP__MAIL__SMTP_URL`) e é redigida no `Debug` da configuração.
 
+Rate limit e proxy:
+
+| Chave | Padrão | O que faz |
+|---|---|---|
+| `rate_limit.login_account_attempts` | 5 | falhas por conta na janela |
+| `rate_limit.login_ip_attempts` | 20 | falhas por IP na janela |
+| `rate_limit.login_window_secs` | 900 | janela fixa de 15 min |
+| `server.trust_proxy_headers` | `false` | lê `X-Forwarded-For`/`X-Real-IP` |
+
+O rate limit é **fail-open**: se o Redis cair, o login continua e o evento vai
+para o log. Só habilite `trust_proxy_headers` atrás de um proxy que sobrescreve
+`X-Forwarded-For`; conexão direta pode forjar o cabeçalho.
+
 ## Endpoints de infraestrutura
 
 | Rota | O que faz |
@@ -99,15 +115,17 @@ Em desenvolvimento use `log`; a senha do SMTP fica só no ambiente
 | `GET /health/ready` | readiness: exige Postgres e Redis; devolve `503` se algum cair |
 | `GET /docs` | UI Scalar com todos os endpoints |
 | `GET /api-docs/openapi.json` | especificação OpenAPI 3 |
+| `GET /metrics` | métricas Prometheus (`axum_http_requests_*`) |
 
 Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
+`/metrics` não tem autenticação: restrinja no proxy ou na rede.
 
 ## Autenticação e permissões
 
 | Rota | O que faz |
 |---|---|
-| `POST /api/v1/auth/login` | e-mail + senha → access token (15 min) + refresh token (7 dias) |
-| `POST /api/v1/auth/refresh` | rotaciona o par; o refresh antigo deixa de valer |
+| `POST /api/v1/auth/login` | e-mail + senha → access token (15 min) + refresh token (7 dias); `429` após 5 falhas na conta |
+| `POST /api/v1/auth/refresh` | rotaciona o par; reutilizar um token consumido revoga a família inteira |
 | `POST /api/v1/auth/logout` | revoga o refresh token (204) |
 | `GET /api/v1/auth/me` | perfil do usuário autenticado (Bearer) |
 | `PATCH /api/v1/auth/me` | altera o próprio nome (`profile:write`) |
@@ -115,7 +133,7 @@ Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
 
 - Senha: **Argon2id**, mínimo de 12 caracteres.
 - Access token: JWT HS256 com `sub`, `role`, `token_version`, `jti`, `iat`, `exp`, `iss`, `aud`.
-- Refresh token: opaco, guardado **hasheado** no Redis e consumido com `GETDEL` (rotação atômica).
+- Refresh token: opaco, guardado **hasheado** no Redis, consumido por script atômico (get + delete + marcador de uso) e ligado a uma família. Reuso de token já consumido revoga todos os tokens daquela família.
 - `token_version` sobe ao trocar senha/papel ou desativar: invalida refresh tokens e sessões sensíveis na hora.
 - A troca da própria senha exige a senha atual, incrementa `token_version` e
   derruba **todas** as sessões, inclusive a que fez a troca; o login é refeito.
@@ -133,7 +151,14 @@ auth.require(USERS_WRITE)?;
 O extractor `AuthUser` é stateless; rotas sensíveis chamam
 `users::service::require_session` para conferir `active`, `token_version` e papel no banco.
 
-> Rate limit no login (`tower_governor`) entra na fase de hardening (7).
+### Idempotência
+
+`POST` aceita `Idempotency-Key` (até 128 caracteres ASCII). A primeira execução
+grava a resposta por 24 h; repetir a mesma chave devolve a mesma resposta sem
+repetir o efeito. Enquanto a primeira ainda está em andamento, a repetição
+recebe `409`. A assinatura inclui o hash do `Authorization`, então a chave de um
+usuário não reproduz a resposta de outro. Sem o cabeçalho, o comportamento é o
+normal; Redis fora do ar também segue sem idempotência (fail-open).
 
 ## Gestão de usuários (admin)
 
@@ -186,6 +211,27 @@ pelo CLI) e senha alterada. O envio real fica atrás da trait `Mailer`
 > Um projeto novo deve enviar só o que é problema de negócio perder: convite,
 > reset de senha, confirmação de pagamento. Métrica e log não precisam de outbox.
 
+## Deploy (Docker)
+
+A imagem é multi-stage (`rust:1.99.1-slim` → `debian:bookworm-slim`) e roda como
+usuário `app` (UID 10001), sem privilégios:
+
+```bash
+just docker-build
+
+APP__JWT__SECRET="$(openssl rand -base64 48)" \
+  docker compose --profile app up -d --build
+
+# migrations são explícitas
+docker compose --profile tools run --rm migrate
+```
+
+- `api` publica `8080`; `worker` roda o outbox de e-mail e a limpeza.
+- `migrate` fica no perfil `tools` e não roda no boot.
+- `APP__SERVER__TRUST_PROXY_HEADERS` fica `false` por padrão; habilite só atrás
+  de um proxy que sobrescreve `X-Forwarded-For`.
+- `GET /metrics` deve ficar restrito à rede de monitoramento.
+
 ## Estrutura
 
 ```text
@@ -200,9 +246,12 @@ src/
 ├── core/
 │   ├── auth/               # role, permission, jwt, password, extractor
 │   ├── cache.rs            # pool Redis + ping
+│   ├── client_ip.rs        # IP do cliente + confiança no proxy
 │   ├── error.rs            # AppError → Problem Details
 │   ├── extract.rs          # ValidatedJson / ValidatedQuery
+│   ├── idempotency.rs      # Idempotency-Key + replay no Redis
 │   ├── mail.rs             # trait Mailer: log e smtp
+│   ├── metrics.rs          # recorder Prometheus (OnceLock)
 │   ├── openapi.rs          # schema do Problem
 │   ├── response.rs         # Page<T> / PageQuery
 │   ├── http.rs             # trace, cors, compress, timeout, request-id
@@ -221,6 +270,8 @@ src/
     └── openapi.rs          # /docs e /api-docs/openapi.json
 
 tests/                      # integração com testcontainers
+.github/workflows/ci.yml    # fmt, clippy, nextest, deny e docker build
+Dockerfile                  # imagem multi-stage, non-root
 
 docs/                       # o "porquê" (AGENTS.md é o contrato)
 ├── architecture.md
@@ -241,7 +292,7 @@ docs/                       # o "porquê" (AGENTS.md é o contrato)
 | 4 | `users` como módulo-referência (CRUD admin) + OpenAPI | ok |
 | 5 | Cache Redis no `users` | cancelada (ADR) |
 | 6 | Worker + cron + e-mail por outbox | ok |
-| 7 | Rate limit, métricas, Dockerfile, snapshot OpenAPI | pendente |
+| 7 | Rate limit, reuso de refresh, métricas, Dockerfile, CI e snapshot OpenAPI | ok |
 
 ## Padrões
 

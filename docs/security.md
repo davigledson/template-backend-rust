@@ -68,8 +68,9 @@ destrutiva. Não use em toda rota: é uma query a mais.
 - **Hasheado** com SHA-256 no Redis; o valor em claro só existe no cliente.
 - Valor armazenado: `"{user_id}:{token_version}"`.
 - TTL de 7 dias.
-- **Rotação**: cada refresh consome o token com `GETDEL` (atômico) e emite um
-  novo par. Reutilizar o token antigo → `401`.
+- **Rotação**: cada refresh consome o token em script atômico (GET + DEL +
+  marcador de uso) e emite um novo par da mesma família. Reutilizar um token
+  consumido revoga a família e devolve `401`.
 - **Logout** apaga o token do Redis.
 
 ### Revogação em massa
@@ -96,9 +97,8 @@ login extra é aceitável.
 
 O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
 
-> **Pendente (fase 7)**: detecção de reuso de refresh token com revogação da
-> família. Hoje, reusar um token já consumido só falha; não derruba as sessões
-> derivadas dele.
+> O marcador de uso fica no Redis pelo mesmo TTL do refresh (7 dias). Reuso
+> revoga a família inteira; um novo login cria outra família e segue válido.
 
 ## Bootstrap de admin
 
@@ -113,7 +113,7 @@ O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
 ## Segredos e configuração
 
 - `APP__JWT__SECRET`: mínimo 32 caracteres, **só** por ambiente. Não tem default,
-  e o boot falha sem ele.
+  e o boot da API/worker falha sem ele; `migrator` e `admin` não exigem segredo.
 - O `Debug` de `Settings` redige o segredo; ele não aparece em log de boot.
 - `.env` é apenas para `development` e está no `.gitignore`.
 - Nunca logar token, senha, hash ou PII. Log de erro 5xx é genérico para o
@@ -151,20 +151,41 @@ interna.
 
 | Ameaça | Resposta atual |
 |---|---|
-| Força bruta de senha | Argon2id + mensagem uniforme; **rate limit pendente** |
+| Força bruta de senha | Argon2id + rate limit por conta (5) e por IP (20) em 15 min; `429` com `Retry-After` |
 | Token roubado (access) | TTL curto + `require_session` nas rotas sensíveis |
-| Token roubado (refresh) | rotação com `GETDEL`, hash no Redis, revogação por `token_version` |
+| Token roubado (refresh) | rotação atômica, hash no Redis, `token_version` e revogação de família no reuso |
+| Repetição de `POST` | `Idempotency-Key` com resposta gravada por 24 h |
 | Escalada de privilégio | permissão checada no servidor; papel validado no banco |
 | Enumeração de contas | mesma resposta para e-mail inexistente/senha errada |
 | Injeção SQL | SeaORM parametrizado; sem SQL concatenado |
 | Vazamento em log | segredo redigido, 5xx genérico, sem PII |
 | Auto-bloqueio do sistema | exclusão/rebaixamento do último admin bloqueado (fase 4) |
 
+## Rate limit e reuso
+
+- **Janela fixa** de 15 min, contadores no Redis, chaves com hash do e-mail/IP
+  (sem PII no Redis).
+- Bloqueio devolve `429` e `Retry-After`; login válido zera as falhas da conta,
+  não as do IP.
+- **Fail-open**: Redis indisponível não impede login; o evento vai para o log.
+  A segunda barreira é o limite por IP no proxy.
+- **Famílias de refresh**: cada login cria uma família; a rotação mantém a
+  família. Reapresentar token já consumido revoga a família inteira. Um novo
+  login (nova família) não é afetado.
+
+## Idempotência
+
+- `Idempotency-Key` é opcional; quando presente, a assinatura inclui método,
+  caminho, hash do `Authorization` e a chave.
+- A primeira execução grava status, `content-type` e corpo por 24 h; repetição
+  devolve a mesma resposta.
+- Enquanto a primeira execução está em andamento, a repetição recebe `409`.
+- `5xx` não é gravado, para permitir retry.
+- Redis fora do ar é fail-open: a requisição segue, mas sem garantia de
+  idempotência.
+
 ## Hardening pendente
 
-- [ ] Rate limit no login (`tower_governor`) e por IP/conta.
-- [ ] Detecção de reuso de refresh token (família) com revogação.
-- [ ] `Idempotency-Key` nas rotas `POST`.
 - [ ] Cabeçalhos de segurança (HSTS, `X-Content-Type-Options`) no proxy.
 - [ ] Rotação de segredo JWT com `kid` (só quando houver necessidade real).
 - [ ] Auditoria de ações administrativas (quem mudou o quê e quando).

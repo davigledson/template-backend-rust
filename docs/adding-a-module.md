@@ -374,7 +374,8 @@ documento final (`/api-docs/openapi.json`, UI em `/docs`) é montado em
 `routes/openapi.rs`, e um teste garante que as rotas aparecem. Se o módulo muda o
 contrato público, atualize `README.md` e `docs/`.
 
-Snapshots com `insta` (`just openapi-check`) entram na fase 7.
+O contrato tem snapshot com `insta` (`just openapi-check`): mudança intencional
+exige atualizar o `.snap` e revisar o diff.
 
 ## Checklist final
 

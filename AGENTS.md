@@ -35,10 +35,13 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just test` | testes com `cargo nextest` |
 | `just fmt` / `just lint` / `just check` | qualidade |
 | `just entities` | gera entidades a partir do banco |
+| `just openapi-check` | snapshot do contrato OpenAPI |
+| `just deny` | licenças, advisories e fontes |
+| `just docker-build` | imagem de produção |
 | `just admin-create <email> "<nome>" [true]` | cria admin (primeiro, ou outro com `true`) |
 | `just admin-promote <email>` | promove usuário a admin |
 | `just admin-reset-password <email>` | redefine senha e invalida sessões |
-| `just ci` | fmt + lint + check + test |
+| `just ci` | fmt + lint + check + test + deny |
 
 ## Mapa
 
@@ -48,12 +51,14 @@ src/
 ├── app.rs             estado + rotas + camadas HTTP
 ├── bin/               admin, migrator, worker
 ├── config/            settings.rs (figment)
-├── core/              auth, cache, mail, erro, http, response, health, state
+├── core/              auth, cache, client_ip, idempotency, mail, metrics,
+│                      erro, http, response, health, state
 ├── database/          connection + entity (gerada)
 ├── migrations/        migrations in-crate
 ├── modules/           auth, email, users
 ├── jobs/              scheduler do worker
-└── routes/            só faz nest
+├── routes/            só faz nest
+└── Dockerfile         imagem multi-stage, non-root
 ```
 
 Direção das dependências:
@@ -109,7 +114,12 @@ Passou disso, quebre por sub-recurso — não crie camada nova.
   sessões sensíveis na hora.
 - Primeiro admin **só por CLI** (`just admin-create`). Nunca rota pública nem seed
   com senha.
-- Access token: 15 min. Refresh: opaco, hasheado no Redis, rotação com `GETDEL`.
+- Access token: 15 min. Refresh: opaco, hasheado no Redis, rotação atômica com
+  marcador de uso (`GET`+`DEL`+`SET` em script).
+- Reuso de refresh já consumido revoga a **família** inteira; o token rotacionado
+  daquela família também deixa de valer.
+- Login tem rate limit por conta e por IP (Redis, janela fixa). Redis fora do ar
+  é fail-open, com log; o proxy deve ter um limite por IP como segunda barreira.
 - Perfil próprio: `PATCH /auth/me` (nome) e `PUT /auth/me/password` (senha atual
   + nova), ambos com `PROFILE_WRITE` e `require_session`.
 - Troca de senha incrementa `token_version` e derruba **todas** as sessões; não
@@ -146,13 +156,17 @@ Passou disso, quebre por sub-recurso — não crie camada nova.
 - Documentação: `/docs` (Scalar) e `/api-docs/openapi.json`. Todo handler novo tem
   `#[utoipa::path]` e entra no mesmo router via `routes!`.
 - `POST` sem ID natural exige `Idempotency-Key`; retry nunca duplica.
+  O middleware grava a resposta por 24 h e assina método + caminho + hash do
+  `Authorization`; repetição em andamento recebe `409`.
 - Mudança breaking de contrato só com depreciação e aviso.
 
 ## Segurança
 
 - Argon2id, mínimo de 12 caracteres; nunca logar senha, token ou PII.
 - Limite de body, timeouts, CORS por ambiente e `x-request-id` já estão nas camadas.
-- Rate limit no login e detecção de reuso de refresh são hardening pendente (fase 7).
+- Rate limit de login e detecção de reuso de refresh estão implementados; ver
+  decisões em `docs/decisions.md` (fail-open e revogação de família).
+- `X-Forwarded-For` só é confiável com `server.trust_proxy_headers = true`.
 - Dependência nova: mantida, licença permitida, features mínimas, `cargo deny`.
 - Segredo JWT: mínimo 32 caracteres, só via `APP__JWT__SECRET`.
 
@@ -162,6 +176,8 @@ Passou disso, quebre por sub-recurso — não crie camada nova.
 - Proibido N+1; paginar sempre; sem `SELECT *` em rota quente.
 - Sem I/O bloqueante dentro de `async`; sem transação ao redor de HTTP.
 - Job de cron não pode segurar o tick; se passar de ~30 s, vira fila.
+- Rate limit é fail-open por decisão: indisponibilidade de Redis não bloqueia login.
+- `/metrics` não tem auth; restrinja no proxy.
 - Meça antes de otimizar.
 
 ## Testes
@@ -170,8 +186,10 @@ Passou disso, quebre por sub-recurso — não crie camada nova.
 - Todo endpoint novo tem teste de integração (testcontainers), como em
   `tests/users_flow.rs`.
 - Autorização e idempotência têm teste próprio.
-- O teste de contrato do OpenAPI (`routes::openapi`) deve continuar verde;
-  snapshot com `insta` chega na fase 7.
+- O snapshot do OpenAPI (`routes::openapi`) deve continuar verde; com mudança
+  intencional de contrato, rode `INSTA_UPDATE=always cargo test --lib routes::openapi`
+  e revise o diff.
+- Rate limit, reuso de refresh e idempotência têm teste de integração próprio.
 - Antes de finalizar: `just fmt && just lint && just test` + smoke real
   (`/health/ready` e, se mexeu em auth, login → me → refresh → logout).
 
@@ -228,7 +246,7 @@ Se não couber em uma pasta, o módulo está grande demais.
 ## Armadilhas conhecidas
 
 - `jsonwebtoken` 12 exige a feature `rust_crypto` (já configurada).
-- `GETDEL` exige Redis ≥ 6.2 (usamos 8).
+- O refresh usa script Lua (GET + DEL + SET do marcador); Redis 8 é o alvo.
 - `just entities` **sobrescreve** `src/database/entity/`.
 - Receitas do `just` não aceitam `:` no nome (`admin-create`, não `admin:create`).
 - `.env` só é carregado no perfil `development`.
@@ -240,6 +258,11 @@ Se não couber em uma pasta, o módulo está grande demais.
 - Redis é cache/fila de estado com `allkeys-lru` e sem AOF: **não** use como
   transporte durável de e-mail.
 - `just worker` só processa algo com `jobs.enabled = true` e infra no ar.
+- O recorder Prometheus é global e instalado uma vez (`core::metrics`); não chame
+  `PrometheusMetricLayer::pair()` direto em teste.
+- Idempotência usa lock de 60 s e resposta de 24 h; o `Idempotency-Key` entra no
+  hash, não no log.
+- A imagem Docker não copia `tests/`; o build usa `--locked` e roda como UID 10001.
 
 ## Git
 
