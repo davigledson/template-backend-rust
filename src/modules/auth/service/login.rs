@@ -1,4 +1,4 @@
-//! Regras de login, refresh, logout e perfil.
+//! Login: valida credenciais, aplica rate limit e emite o par de tokens.
 
 use crate::{
     core::{
@@ -10,11 +10,11 @@ use crate::{
         error::AppError,
         state::AppState,
     },
-    database::entity::users,
     modules::{
         auth::{
-            dto::{LoginRequest, RefreshRequest, TokenResponse},
-            repository::{self, ConsumeOutcome},
+            dto::{LoginRequest, TokenResponse},
+            repository,
+            service::tokens::issue_tokens,
         },
         users::service as users_service,
     },
@@ -102,88 +102,6 @@ async fn register_failure(limiter: &LoginRateLimiter<'_>, account_key: &str, ip_
     }
 }
 
-pub async fn refresh(state: &AppState, request: RefreshRequest) -> Result<TokenResponse, AppError> {
-    let token = request.refresh_token.trim();
-    if token.is_empty() {
-        return Err(invalid_refresh());
-    }
-
-    let ttl = state.config.jwt.refresh_ttl();
-    let ticket = match repository::consume(&state.cache, token, ttl).await? {
-        ConsumeOutcome::Active(ticket) => ticket,
-        ConsumeOutcome::Reused(family_id) => {
-            repository::revoke_family(&state.cache, family_id, ttl).await?;
-            tracing::warn!(
-                family = %family_id,
-                "reuso de refresh token detectado; família revogada"
-            );
-            return Err(AppError::Unauthorized(
-                "reuso de refresh token detectado; faça login novamente".to_owned(),
-            ));
-        }
-        ConsumeOutcome::Unknown => return Err(invalid_refresh()),
-    };
-
-    if repository::is_family_revoked(&state.cache, ticket.family_id).await? {
-        return Err(invalid_refresh());
-    }
-
-    let user = users_service::find_by_id(&state.db, ticket.user_id)
-        .await?
-        .filter(|user| user.active)
-        .ok_or_else(invalid_refresh)?;
-
-    if user.token_version != ticket.token_version {
-        return Err(invalid_refresh());
-    }
-
-    let role = Role::parse(&user.role)
-        .ok_or_else(|| AppError::internal(format!("papel inválido no banco: {}", user.role)))?;
-
-    issue_tokens(state, &user, role, ticket.family_id).await
-}
-
-pub async fn logout(state: &AppState, request: RefreshRequest) -> Result<(), AppError> {
-    let token = request.refresh_token.trim();
-    if !token.is_empty() {
-        repository::revoke(&state.cache, token).await?;
-    }
-    Ok(())
-}
-
-async fn issue_tokens(
-    state: &AppState,
-    user: &users::Model,
-    role: Role,
-    family_id: uuid::Uuid,
-) -> Result<TokenResponse, AppError> {
-    let access_token = state
-        .jwt
-        .issue_access(user.id, &user.email, role, user.token_version)?;
-
-    let refresh_token = repository::generate_token();
-    repository::store(
-        &state.cache,
-        &refresh_token,
-        user.id,
-        user.token_version,
-        family_id,
-        state.config.jwt.refresh_ttl(),
-    )
-    .await?;
-
-    Ok(TokenResponse {
-        access_token,
-        refresh_token,
-        token_type: "Bearer",
-        expires_in: state.jwt.access_ttl_secs(),
-    })
-}
-
 fn invalid_credentials() -> AppError {
     AppError::Unauthorized("credenciais inválidas".to_owned())
-}
-
-fn invalid_refresh() -> AppError {
-    AppError::Unauthorized("refresh token inválido ou expirado".to_owned())
 }
