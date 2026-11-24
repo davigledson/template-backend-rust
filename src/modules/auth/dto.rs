@@ -20,6 +20,22 @@ pub struct RefreshRequest {
     pub refresh_token: String,
 }
 
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateProfileRequest {
+    #[validate(length(min = 1, max = 120))]
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChangeOwnPasswordRequest {
+    #[validate(length(min = 1, max = 128))]
+    pub current_password: String,
+    #[validate(length(min = 12, max = 128))]
+    pub new_password: String,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenResponse {

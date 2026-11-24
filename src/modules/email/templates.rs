@@ -30,6 +30,19 @@ pub fn password_changed(name: &str, to: &str) -> EmailMessage {
     }
 }
 
+pub fn password_changed_by_user(name: &str, to: &str) -> EmailMessage {
+    EmailMessage {
+        to: to.to_owned(),
+        subject: "Sua senha foi alterada".to_owned(),
+        body: format!(
+            "Olá, {name}.\n\n\
+             A senha da sua conta ({to}) foi alterada por você.\n\
+             Todas as sessões foram encerradas; entre novamente com a nova senha.\n\n\
+             Se não foi você, redefina a senha imediatamente e avise o suporte.\n"
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -45,5 +58,12 @@ mod tests {
     fn aviso_de_senha_tem_assunto_proprio() {
         let message = password_changed("Ana", "ana@teste.local");
         assert_eq!(message.subject, "Sua senha foi alterada");
+    }
+
+    #[test]
+    fn aviso_de_troca_propria_nao_cita_admin() {
+        let message = password_changed_by_user("Ana", "ana@teste.local");
+        assert!(message.body.contains("por você"));
+        assert!(!message.body.contains("administrador"));
     }
 }

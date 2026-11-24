@@ -249,6 +249,96 @@ async fn fluxo_completo_de_usuarios() {
         .json(&json!({ "email": "ana@teste.local", "password": "SenhaNova#2026" }))
         .await;
     new_login.assert_status_ok();
+    let ana_session: Value = new_login.json();
+    let ana_token = ana_session["accessToken"]
+        .as_str()
+        .expect("access token da ana")
+        .to_owned();
+    let ana_refresh = ana_session["refreshToken"]
+        .as_str()
+        .expect("refresh token da ana")
+        .to_owned();
+
+    // --- perfil do próprio usuário ---
+    let patched: Value = server
+        .patch("/api/v1/auth/me")
+        .add_header("authorization", bearer(&ana_token))
+        .json(&json!({ "name": "Ana Souza" }))
+        .await
+        .json();
+    assert_eq!(patched["name"], "Ana Souza");
+
+    let me_ana: Value = server
+        .get("/api/v1/auth/me")
+        .add_header("authorization", bearer(&ana_token))
+        .await
+        .json();
+    assert_eq!(me_ana["name"], "Ana Souza");
+
+    let short = server
+        .put("/api/v1/auth/me/password")
+        .add_header("authorization", bearer(&ana_token))
+        .json(&json!({
+            "currentPassword": "SenhaNova#2026",
+            "newPassword": "curta"
+        }))
+        .await;
+    short.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+
+    let wrong_current = server
+        .put("/api/v1/auth/me/password")
+        .add_header("authorization", bearer(&ana_token))
+        .json(&json!({
+            "currentPassword": "senha-errada#2026",
+            "newPassword": "SenhaFinal#2026"
+        }))
+        .await;
+    wrong_current.assert_status(StatusCode::UNAUTHORIZED);
+
+    let same_password = server
+        .put("/api/v1/auth/me/password")
+        .add_header("authorization", bearer(&ana_token))
+        .json(&json!({
+            "currentPassword": "SenhaNova#2026",
+            "newPassword": "SenhaNova#2026"
+        }))
+        .await;
+    same_password.assert_status(StatusCode::BAD_REQUEST);
+
+    let changed = server
+        .put("/api/v1/auth/me/password")
+        .add_header("authorization", bearer(&ana_token))
+        .json(&json!({
+            "currentPassword": "SenhaNova#2026",
+            "newPassword": "SenhaFinal#2026"
+        }))
+        .await;
+    changed.assert_status_no_content();
+
+    // A troca derruba inclusive a sessão que a fez.
+    let stale_after_change = server
+        .get("/api/v1/auth/me")
+        .add_header("authorization", bearer(&ana_token))
+        .await;
+    stale_after_change.assert_status(StatusCode::UNAUTHORIZED);
+
+    let stale_refresh = server
+        .post("/api/v1/auth/refresh")
+        .json(&json!({ "refreshToken": ana_refresh }))
+        .await;
+    stale_refresh.assert_status(StatusCode::UNAUTHORIZED);
+
+    let old_password = server
+        .post("/api/v1/auth/login")
+        .json(&json!({ "email": "ana@teste.local", "password": "SenhaNova#2026" }))
+        .await;
+    old_password.assert_status(StatusCode::UNAUTHORIZED);
+
+    let final_login = server
+        .post("/api/v1/auth/login")
+        .json(&json!({ "email": "ana@teste.local", "password": "SenhaFinal#2026" }))
+        .await;
+    final_login.assert_status_ok();
 
     // --- proteções do próprio admin ---
     let admin_me: Value = server
@@ -277,14 +367,14 @@ async fn fluxo_completo_de_usuarios() {
         .count(&db_check)
         .await
         .expect("contagem do outbox");
-    assert_eq!(pending, 3, "admin + ana + aviso de senha");
+    assert_eq!(pending, 4, "admin + ana + reset + troca própria");
 
     let recording = RecordingMailer::default();
     let summary = email_service::process_pending(&db_check, &recording, 10)
         .await
         .expect("processar outbox");
-    assert_eq!(summary.claimed, 3);
-    assert_eq!(summary.sent, 3);
+    assert_eq!(summary.claimed, 4);
+    assert_eq!(summary.sent, 4);
     assert_eq!(summary.failed, 0);
 
     let subjects: Vec<String> = recording
@@ -301,10 +391,12 @@ async fn fluxo_completo_de_usuarios() {
             .count(),
         2
     );
-    assert!(
+    assert_eq!(
         subjects
             .iter()
-            .any(|subject| subject == "Sua senha foi alterada")
+            .filter(|subject| *subject == "Sua senha foi alterada")
+            .count(),
+        2
     );
 
     let sent = Outbox::find()
@@ -312,7 +404,7 @@ async fn fluxo_completo_de_usuarios() {
         .count(&db_check)
         .await
         .expect("enviados");
-    assert_eq!(sent, 3);
+    assert_eq!(sent, 4);
 
     // Deduplicação pelo dedupe_key.
     let message = EmailMessage {
@@ -354,6 +446,8 @@ async fn fluxo_completo_de_usuarios() {
     // --- documentação ---
     let spec: Value = server.get("/api-docs/openapi.json").await.json();
     assert!(spec["paths"]["/api/v1/users"].is_object());
+    assert!(spec["paths"]["/api/v1/auth/me"]["patch"].is_object());
+    assert!(spec["paths"]["/api/v1/auth/me/password"]["put"].is_object());
     assert!(spec["components"]["securitySchemes"]["bearer"].is_object());
 
     let docs = server.get("/docs").await;
