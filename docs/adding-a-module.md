@@ -242,21 +242,23 @@ Se duas escritas precisam ser atômicas, abra a transação no **service** e pas
 
 ## 6. Controller
 
-Extrai, valida, checa permissão, chama service, responde.
+Extrai, valida, checa permissão, chama service, responde. A rota é registrada
+com `routes!` — o mesmo registro serve o Axum e o OpenAPI.
 
 ```rust
 // src/modules/notes/controller.rs
 use axum::{
-    Json, Router,
-    extract::{Query, State},
+    Json,
+    extract::{Path, State},
     http::StatusCode,
-    routing::{get, post},
 };
-use axum_valid::Valid;
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::core::auth::{extractor::AuthUser, permission::PROFILE_WRITE};
 use crate::core::{
     error::AppError,
+    extract::{ValidatedJson, ValidatedQuery},
+    openapi::Problem,
     response::{Page, PageQuery},
     state::AppState,
 };
@@ -265,15 +267,26 @@ use crate::modules::notes::{
     service,
 };
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/", get(list).post(create))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(list, create))
 }
 
+#[utoipa::path(
+    get,
+    path = "/notes",
+    tag = "notes",
+    params(PageQuery),
+    security(("bearer" = [])),
+    responses(
+        (status = 200, body = Page<NoteOut>),
+        (status = 401, body = Problem),
+        (status = 403, body = Problem),
+    )
+)]
 async fn list(
     State(state): State<AppState>,
     auth: AuthUser,
-    Valid(Query(page)): Valid<Query<PageQuery>>,
+    ValidatedQuery(page): ValidatedQuery<PageQuery>,
 ) -> Result<Json<Page<NoteOut>>, AppError> {
     auth.require(PROFILE_WRITE)?;
 
@@ -286,10 +299,21 @@ async fn list(
     Ok(Json(Page::new(items, page.page, page.per_page(), total)))
 }
 
+#[utoipa::path(
+    post,
+    path = "/notes",
+    tag = "notes",
+    request_body = CreateNote,
+    security(("bearer" = [])),
+    responses(
+        (status = 201, body = NoteOut),
+        (status = 422, body = Problem),
+    )
+)]
 async fn create(
     State(state): State<AppState>,
     auth: AuthUser,
-    Valid(Json(body)): Valid<Json<CreateNote>>,
+    ValidatedJson(body): ValidatedJson<CreateNote>,
 ) -> Result<(StatusCode, Json<NoteOut>), AppError> {
     auth.require(PROFILE_WRITE)?;
 
@@ -298,10 +322,20 @@ async fn create(
 }
 ```
 
+`ValidatedJson`/`ValidatedQuery` transformam falha de validação em
+`422 application/problem+json`; o `Json`/`Query` do Axum devolveria texto puro.
+
 Não use `if auth.role == Role::Admin`: peça a permissão. Se a permissão ainda não
 existe, adicione ao catálogo em `core/auth/permission.rs` **e** ao mapa do papel.
 
+Rotas que precisam conferir `active`, `token_version` e papel no banco chamam
+`users::service::require_session(&state.db, &auth).await?` (é o que o módulo
+`users` faz).
+
 ## 7. Registrar o módulo
+
+O path do `#[utoipa::path]` já inclui o prefixo do módulo (`/notes`), então o
+registro é um `merge`:
 
 ```rust
 // src/modules/mod.rs
@@ -309,12 +343,18 @@ pub mod auth;
 pub mod notes;
 pub mod users;
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .nest("/auth", auth::router())
-        .nest("/notes", notes::router())
+use utoipa_axum::router::OpenApiRouter;
+
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .merge(auth::router())
+        .merge(notes::router())
+        .merge(users::router())
 }
 ```
+
+O `/api/v1` é aplicado uma única vez em `routes/openapi.rs`, que também gera o
+`/api-docs/openapi.json` e serve o Scalar em `/docs`.
 
 ## 8. Testes
 
@@ -329,9 +369,12 @@ just fmt && just lint && just test
 
 ## 9. OpenAPI e docs
 
-Na fase 4, cada handler ganha `#[utoipa::path]` e o módulo entra no documento.
-Atualize o snapshot no mesmo PR (`just openapi-check`). Se o módulo muda o
+Cada handler tem `#[utoipa::path]`; o `routes!` já entrega a rota e o schema. O
+documento final (`/api-docs/openapi.json`, UI em `/docs`) é montado em
+`routes/openapi.rs`, e um teste garante que as rotas aparecem. Se o módulo muda o
 contrato público, atualize `README.md` e `docs/`.
+
+Snapshots com `insta` (`just openapi-check`) entram na fase 7.
 
 ## Checklist final
 

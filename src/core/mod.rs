@@ -1,8 +1,10 @@
 pub mod auth;
 pub mod cache;
 pub mod error;
+pub mod extract;
 pub mod health;
 pub mod http;
+pub mod openapi;
 pub mod response;
 pub mod shutdown;
 pub mod state;

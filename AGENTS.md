@@ -71,7 +71,8 @@ routes → modules/<feature> → core
 - **Entidade é gerada.** Rode `just entities`; não edite `database/entity/` à mão.
 - **Migration é forward-only** e nunca roda no boot da API.
 - **Segredo nunca** em TOML, log ou commit. Use `APP__*`/`.env` (só dev).
-- **Validação no DTO**, antes do service. Repository não valida.
+- **Validação no DTO**, antes do service (`ValidatedJson`/`ValidatedQuery` → 422
+  em Problem Details). Repository não valida.
 - **Transação curta**; efeitos externos (e-mail, webhook) depois do commit.
 - **Sem `utils.rs`.** Helper sem dono vai para `core::<tema>`; com dono, fica no módulo.
 - **Sem repositório genérico** e sem container de DI: `AppState` + `Arc` bastam.
@@ -120,6 +121,8 @@ Passou disso, quebre por sub-recurso — não crie camada nova.
 - Lista: `{ items, page, perPage, total }`.
 - Erro: `application/problem+json` (RFC 9457).
 - `404`/`405` também em Problem Details.
+- Documentação: `/docs` (Scalar) e `/api-docs/openapi.json`. Todo handler novo tem
+  `#[utoipa::path]` e entra no mesmo router via `routes!`.
 - `POST` sem ID natural exige `Idempotency-Key`; retry nunca duplica.
 - Mudança breaking de contrato só com depreciação e aviso.
 
@@ -142,9 +145,11 @@ Passou disso, quebre por sub-recurso — não crie camada nova.
 ## Testes
 
 - Toda regra de service tem teste unitário.
-- Todo endpoint novo tem teste de integração (testcontainers — fase 7).
+- Todo endpoint novo tem teste de integração (testcontainers), como em
+  `tests/users_flow.rs`.
 - Autorização e idempotência têm teste próprio.
-- Snapshot do OpenAPI é atualizado no mesmo PR (fase 4).
+- O teste de contrato do OpenAPI (`routes::openapi`) deve continuar verde;
+  snapshot com `insta` chega na fase 7.
 - Antes de finalizar: `just fmt && just lint && just test` + smoke real
   (`/health/ready` e, se mexeu em auth, login → me → refresh → logout).
 

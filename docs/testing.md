@@ -62,8 +62,10 @@ permissão.
 ## Testes de integração
 
 Dependências já no `Cargo.toml`: `axum-test`, `testcontainers` 0.27 e
-`testcontainers-modules` 0.15 (`postgres`, `redis`). Ainda não existe `tests/`
-— entra na fase 7.
+`testcontainers-modules` 0.15 (`postgres`, `redis`). O exemplo real é
+`tests/users_flow.rs`: sobe Postgres 18 e Redis 8, aplica migrations, cria o
+admin e percorre criação, listagem, autorização, troca de papel, soft delete,
+reset de senha e OpenAPI.
 
 Esqueleto de um teste de auth:
 
@@ -114,6 +116,13 @@ Regras para integração:
 - [ ] conflito/duplicidade → 409
 - [ ] isolamento: usuário A não acessa recurso de B
 - [ ] `POST` com `Idempotency-Key`: repetir não duplica
+
+## Teste de contrato do OpenAPI
+
+`src/routes/openapi.rs` tem testes que montam o documento sem subir servidor e
+verificam que as rotas e o esquema `bearer` existem. Ao adicionar um módulo, ele
+passa a ser coberto automaticamente; se uma rota desaparecer do documento, o
+teste falha.
 
 ## Smoke manual
 

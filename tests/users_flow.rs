@@ -1,0 +1,288 @@
+//! Fluxo de ponta a ponta da gestão de usuários, com Postgres e Redis reais.
+//!
+//! Um único teste mantém os containers vivos e executa o fluxo completo em
+//! ordem. Os testes unitários cobrem as regras puras (último admin etc.).
+
+use std::sync::Arc;
+
+use axum::http::StatusCode;
+use axum_test::TestServer;
+use sea_orm::Database;
+use sea_orm_migration::MigratorTrait;
+use serde_json::{Value, json};
+use template_backend_rust::{
+    app,
+    config::settings::Settings,
+    core::auth::role::Role,
+    core::{auth::jwt::JwtService, cache::Cache, state::AppState},
+    migrations::Migrator,
+    modules::users::service::{self as users_service, NewUser},
+};
+use testcontainers::{ImageExt, runners::AsyncRunner};
+use testcontainers_modules::{postgres::Postgres, redis::Redis};
+
+const ADMIN_EMAIL: &str = "admin@teste.local";
+const ADMIN_PASSWORD: &str = "AdminTeste#2026";
+
+#[tokio::test]
+async fn fluxo_completo_de_usuarios() {
+    // --- infra ---
+    let postgres = Postgres::default()
+        .with_tag("18-alpine")
+        .start()
+        .await
+        .expect("postgres");
+    let redis = Redis::default()
+        .with_tag("8-alpine")
+        .start()
+        .await
+        .expect("redis");
+
+    let pg_port = postgres
+        .get_host_port_ipv4(5432)
+        .await
+        .expect("porta do postgres");
+    let redis_port = redis
+        .get_host_port_ipv4(6379)
+        .await
+        .expect("porta do redis");
+
+    let mut settings = Settings::default();
+    settings.database.url = format!("postgres://postgres:postgres@127.0.0.1:{pg_port}/postgres");
+    settings.redis.url = format!("redis://127.0.0.1:{redis_port}");
+    settings.jwt.secret = "segredo-de-integracao-com-mais-de-32-chars".to_owned();
+    settings.validate().expect("configuração de teste");
+
+    let db = Database::connect(&settings.database.url)
+        .await
+        .expect("conexão com o postgres");
+    Migrator::up(&db, None).await.expect("migrations");
+
+    users_service::create(
+        &db,
+        NewUser {
+            name: "Admin".to_owned(),
+            email: ADMIN_EMAIL.to_owned(),
+            password: ADMIN_PASSWORD.to_owned(),
+            role: Role::Admin,
+        },
+    )
+    .await
+    .expect("admin de teste");
+
+    let cache = Cache::connect(&settings.redis).expect("cache");
+    let jwt = JwtService::new(&settings.jwt).expect("jwt");
+    let server = TestServer::new(app::build(AppState::new(
+        db,
+        cache,
+        jwt,
+        Arc::new(settings),
+    )));
+
+    // --- sem token ---
+    let response = server.get("/api/v1/users").await;
+    response.assert_status(StatusCode::UNAUTHORIZED);
+    assert!(
+        response
+            .content_type()
+            .starts_with("application/problem+json")
+    );
+
+    let admin = login(&server, ADMIN_EMAIL, ADMIN_PASSWORD).await;
+
+    // --- criação ---
+    let response = server
+        .post("/api/v1/users")
+        .add_header("authorization", bearer(&admin))
+        .json(&json!({
+            "name": "Ana",
+            "email": "ana@teste.local",
+            "password": "SenhaDaAna#2026",
+            "role": "user"
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let created: Value = response.json();
+    assert_eq!(created["email"], "ana@teste.local");
+    assert_eq!(created["role"], "user");
+    assert!(created.get("passwordHash").is_none());
+    let ana_id = created["id"].as_str().expect("id da ana").to_owned();
+
+    let duplicate = server
+        .post("/api/v1/users")
+        .add_header("authorization", bearer(&admin))
+        .json(&json!({
+            "name": "Outra",
+            "email": "ANA@teste.local",
+            "password": "OutraSenha#2026"
+        }))
+        .await;
+    duplicate.assert_status(StatusCode::CONFLICT);
+
+    let invalid = server
+        .post("/api/v1/users")
+        .add_header("authorization", bearer(&admin))
+        .json(&json!({
+            "name": "Curta",
+            "email": "curta@teste.local",
+            "password": "curta"
+        }))
+        .await;
+    invalid.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        invalid
+            .content_type()
+            .starts_with("application/problem+json")
+    );
+
+    // --- listagem e filtro ---
+    let page: Value = server
+        .get("/api/v1/users?search=ana&perPage=10")
+        .add_header("authorization", bearer(&admin))
+        .await
+        .json();
+    assert_eq!(page["total"], 1);
+    assert_eq!(page["items"][0]["id"], ana_id.as_str());
+    assert_eq!(page["perPage"], 10);
+
+    // --- usuário comum não gerencia usuários ---
+    let ana = login(&server, "ana@teste.local", "SenhaDaAna#2026").await;
+    let forbidden = server
+        .get("/api/v1/users")
+        .add_header("authorization", bearer(&ana))
+        .await;
+    forbidden.assert_status(StatusCode::FORBIDDEN);
+    assert!(
+        forbidden
+            .content_type()
+            .starts_with("application/problem+json")
+    );
+
+    // --- mudança de papel invalida a sessão antiga ---
+    let promoted = server
+        .patch(&format!("/api/v1/users/{ana_id}"))
+        .add_header("authorization", bearer(&admin))
+        .json(&json!({ "name": "Ana Silva", "role": "admin" }))
+        .await;
+    promoted.assert_status_ok();
+    let promoted: Value = promoted.json();
+    assert_eq!(promoted["name"], "Ana Silva");
+    assert_eq!(promoted["role"], "admin");
+
+    let stale = server
+        .get("/api/v1/auth/me")
+        .add_header("authorization", bearer(&ana))
+        .await;
+    stale.assert_status(StatusCode::UNAUTHORIZED);
+
+    let ana_admin = login(&server, "ana@teste.local", "SenhaDaAna#2026").await;
+    let me: Value = server
+        .get("/api/v1/auth/me")
+        .add_header("authorization", bearer(&ana_admin))
+        .await
+        .json();
+    assert_eq!(me["role"], "admin");
+
+    // --- rebaixar (há outro admin) e desativar ---
+    let demoted = server
+        .patch(&format!("/api/v1/users/{ana_id}"))
+        .add_header("authorization", bearer(&admin))
+        .json(&json!({ "role": "user" }))
+        .await;
+    demoted.assert_status_ok();
+
+    let deleted = server
+        .delete(&format!("/api/v1/users/{ana_id}"))
+        .add_header("authorization", bearer(&admin))
+        .await;
+    deleted.assert_status_no_content();
+
+    // Soft delete é idempotente.
+    let deleted_again = server
+        .delete(&format!("/api/v1/users/{ana_id}"))
+        .add_header("authorization", bearer(&admin))
+        .await;
+    deleted_again.assert_status_no_content();
+
+    let inactive: Value = server
+        .get(&format!("/api/v1/users/{ana_id}"))
+        .add_header("authorization", bearer(&admin))
+        .await
+        .json();
+    assert_eq!(inactive["active"], false);
+
+    // --- redefinir senha e reativar ---
+    let password = server
+        .put(&format!("/api/v1/users/{ana_id}/password"))
+        .add_header("authorization", bearer(&admin))
+        .json(&json!({ "password": "SenhaNova#2026" }))
+        .await;
+    password.assert_status_no_content();
+
+    let reactivated = server
+        .patch(&format!("/api/v1/users/{ana_id}"))
+        .add_header("authorization", bearer(&admin))
+        .json(&json!({ "active": true }))
+        .await;
+    reactivated.assert_status_ok();
+
+    let old_login = server
+        .post("/api/v1/auth/login")
+        .json(&json!({ "email": "ana@teste.local", "password": "SenhaDaAna#2026" }))
+        .await;
+    old_login.assert_status(StatusCode::UNAUTHORIZED);
+
+    let new_login = server
+        .post("/api/v1/auth/login")
+        .json(&json!({ "email": "ana@teste.local", "password": "SenhaNova#2026" }))
+        .await;
+    new_login.assert_status_ok();
+
+    // --- proteções do próprio admin ---
+    let admin_me: Value = server
+        .get("/api/v1/auth/me")
+        .add_header("authorization", bearer(&admin))
+        .await
+        .json();
+    let admin_id = admin_me["id"].as_str().expect("id do admin");
+
+    let self_delete = server
+        .delete(&format!("/api/v1/users/{admin_id}"))
+        .add_header("authorization", bearer(&admin))
+        .await;
+    self_delete.assert_status(StatusCode::CONFLICT);
+
+    let empty_patch = server
+        .patch(&format!("/api/v1/users/{ana_id}"))
+        .add_header("authorization", bearer(&admin))
+        .json(&json!({}))
+        .await;
+    empty_patch.assert_status(StatusCode::BAD_REQUEST);
+
+    // --- documentação ---
+    let spec: Value = server.get("/api-docs/openapi.json").await.json();
+    assert!(spec["paths"]["/api/v1/users"].is_object());
+    assert!(spec["components"]["securitySchemes"]["bearer"].is_object());
+
+    let docs = server.get("/docs").await;
+    docs.assert_status_ok();
+    assert!(docs.text().contains("Scalar"));
+}
+
+fn bearer(token: &str) -> String {
+    format!("Bearer {token}")
+}
+
+async fn login(server: &TestServer, email: &str, password: &str) -> String {
+    let response = server
+        .post("/api/v1/auth/login")
+        .json(&json!({ "email": email, "password": password }))
+        .await;
+    response.assert_status_ok();
+
+    let body: Value = response.json();
+    body["accessToken"]
+        .as_str()
+        .expect("access token")
+        .to_owned()
+}

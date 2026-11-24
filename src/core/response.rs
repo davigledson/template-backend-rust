@@ -3,6 +3,7 @@
 //! Listas devolvem `{ items, page, perPage, total }` (camelCase).
 
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
 const DEFAULT_PAGE: u64 = 1;
@@ -29,14 +30,17 @@ impl<T> Page<T> {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Validate)]
+#[derive(Debug, Clone, Deserialize, Validate, ToSchema, IntoParams)]
 #[serde(rename_all = "camelCase")]
+#[into_params(parameter_in = Query)]
 pub struct PageQuery {
     #[serde(default = "default_page")]
     #[validate(range(min = 1))]
+    #[param(minimum = 1, default = 1)]
     pub page: u64,
     #[serde(default = "default_per_page")]
     #[validate(range(min = 1, max = 100))]
+    #[param(minimum = 1, maximum = 100, default = 20)]
     pub per_page: u64,
 }
 

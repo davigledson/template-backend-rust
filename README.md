@@ -85,6 +85,8 @@ no mínimo 32 caracteres (validado no boot).
 |---|---|
 | `GET /health` | liveness: o processo está de pé (não toca no banco) |
 | `GET /health/ready` | readiness: exige Postgres e Redis; devolve `503` se algum cair |
+| `GET /docs` | UI Scalar com todos os endpoints |
+| `GET /api-docs/openapi.json` | especificação OpenAPI 3 |
 
 Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
 
@@ -117,6 +119,25 @@ O extractor `AuthUser` é stateless; rotas sensíveis chamam
 
 > Rate limit no login (`tower_governor`) entra na fase de hardening (7).
 
+## Gestão de usuários (admin)
+
+| Rota | Permissão | O que faz |
+|---|---|---|
+| `GET /api/v1/users` | `users:read` | lista com `page`, `perPage`, `search`, `role`, `active` |
+| `POST /api/v1/users` | `users:write` | cria usuário (não existe cadastro público) |
+| `GET /api/v1/users/{id}` | `users:read` | detalhe |
+| `PATCH /api/v1/users/{id}` | `users:write` | atualiza `name`, `email`, `role`, `active` |
+| `DELETE /api/v1/users/{id}` | `users:delete` | soft delete (`active = false`), idempotente |
+| `PUT /api/v1/users/{id}/password` | `users:write` | redefine a senha e invalida as sessões |
+
+Proteções:
+
+- admin não desativa nem rebaixa a si mesmo;
+- não é possível remover o último admin ativo;
+- mudar papel ou desativar incrementa `token_version` e derruba as sessões;
+- `PATCH` usa `version` para concorrência otimista (409 se alguém alterou antes);
+- `DELETE` repetido devolve `204` (idempotente).
+
 ## Estrutura
 
 ```text
@@ -132,6 +153,8 @@ src/
 │   ├── auth/               # role, permission, jwt, password, extractor
 │   ├── cache.rs            # pool Redis + ping
 │   ├── error.rs            # AppError → Problem Details
+│   ├── extract.rs          # ValidatedJson / ValidatedQuery
+│   ├── openapi.rs          # schema do Problem
 │   ├── response.rs         # Page<T> / PageQuery
 │   ├── http.rs             # trace, cors, compress, timeout, request-id
 │   └── health.rs           # liveness / readiness
@@ -141,9 +164,13 @@ src/
 ├── migrations/             # in-crate (sea-orm-migration)
 ├── modules/
 │   ├── auth/               # login, refresh, logout, me
-│   └── users/              # dono da tabela users
+│   └── users/              # dono da tabela users + CRUD admin
 ├── jobs/                   # registro dos jobs (fase 6)
-└── routes/                 # só faz nest dos routers
+└── routes/
+    ├── mod.rs              # monta health + módulos + docs
+    └── openapi.rs          # /docs e /api-docs/openapi.json
+
+tests/                      # integração com testcontainers
 
 docs/                       # o "porquê" (AGENTS.md é o contrato)
 ├── architecture.md
@@ -161,7 +188,7 @@ docs/                       # o "porquê" (AGENTS.md é o contrato)
 | 1 | Core: settings, state, erro, http, health, shutdown | ✅ |
 | 2 | Migration `users`, entidade e migrator | ✅ |
 | 3 | Auth JWT (login/refresh/logout/me) + bootstrap admin | ✅ |
-| 4 | `users` como módulo-referência (CRUD admin) + OpenAPI | ⬜ |
+| 4 | `users` como módulo-referência (CRUD admin) + OpenAPI | ✅ |
 | 5 | Cache Redis no `users` | ⬜ |
 | 6 | Worker + cron | ⬜ |
 | 7 | Testes de integração, métricas, rate limit, Dockerfile | ⬜ |

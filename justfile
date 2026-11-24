@@ -99,7 +99,7 @@ entities:
         --with-prelude none \
         --date-time-crate chrono
 
-# Verifica o snapshot do OpenAPI (Fase 4).
+# Verifica o snapshot do OpenAPI (fase 7).
 openapi-check:
     cargo insta test --check
 

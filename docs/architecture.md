@@ -98,6 +98,11 @@ TCP
 - O **erro** sempre termina em `application/problem+json` (RFC 9457) e 5xx nunca
   vaza detalhe para o cliente: o detalhe fica no log com o `x-request-id`.
 
+A documentação não é um artefato paralelo: cada handler declara
+`#[utoipa::path]` e é registrado por `routes!`, então o mesmo router atende e
+gera o OpenAPI. `routes/openapi.rs` serve o JSON em `/api-docs/openapi.json` e o
+Scalar em `/docs`.
+
 ## Configuração
 
 Ordem de precedência (a última vence):

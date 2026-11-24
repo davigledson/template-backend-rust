@@ -3,10 +3,13 @@
 pub mod auth;
 pub mod users;
 
-use axum::Router;
+use utoipa_axum::router::OpenApiRouter;
 
 use crate::core::state::AppState;
 
-pub fn router() -> Router<AppState> {
-    Router::new().nest("/auth", auth::router())
+/// Junta os routers de todos os módulos, já com os paths documentados.
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .merge(auth::router())
+        .merge(users::router())
 }

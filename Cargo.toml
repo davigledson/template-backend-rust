@@ -21,7 +21,6 @@ path = "src/bin/worker.rs"
 [dependencies]
 # --- HTTP / runtime ---
 axum = "0.8.9"
-axum-valid = { version = "0.25.0", features = ["validator", "json", "query"] }
 tokio = { version = "1.54.1", features = ["full"] }
 tokio-util = "0.7.20"
 tower = { version = "0.5.3", features = ["util"] }

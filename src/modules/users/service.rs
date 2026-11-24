@@ -12,7 +12,7 @@ use crate::{
         error::AppError,
     },
     database::entity::users,
-    modules::users::repository,
+    modules::users::{dto::ListUsersQuery, repository},
 };
 
 pub struct NewUser {
@@ -20,6 +20,20 @@ pub struct NewUser {
     pub email: String,
     pub password: String,
     pub role: Role,
+}
+
+#[derive(Debug, Default)]
+pub struct UserUpdate {
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub role: Option<Role>,
+    pub active: Option<bool>,
+}
+
+impl UserUpdate {
+    pub fn is_empty(&self) -> bool {
+        self.name.is_none() && self.email.is_none() && self.role.is_none() && self.active.is_none()
+    }
 }
 
 pub fn normalize_email(email: &str) -> String {
@@ -38,6 +52,27 @@ pub async fn find_by_email(
     email: &str,
 ) -> Result<Option<users::Model>, AppError> {
     Ok(repository::find_by_email(db, &normalize_email(email)).await?)
+}
+
+pub async fn list(
+    db: &DatabaseConnection,
+    query: &ListUsersQuery,
+) -> Result<(Vec<users::Model>, u64), AppError> {
+    let search = query
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|term| !term.is_empty());
+
+    Ok(repository::list(
+        db,
+        query.offset(),
+        query.per_page(),
+        search,
+        query.role,
+        query.active,
+    )
+    .await?)
 }
 
 pub async fn create(db: &DatabaseConnection, input: NewUser) -> Result<users::Model, AppError> {
@@ -79,6 +114,154 @@ pub async fn create(db: &DatabaseConnection, input: NewUser) -> Result<users::Mo
         }
         Err(error) => Err(AppError::Database(error)),
     }
+}
+
+/// Atualização parcial feita por um administrador.
+pub async fn update(
+    db: &DatabaseConnection,
+    actor: &AuthUser,
+    target_id: Uuid,
+    input: UserUpdate,
+) -> Result<users::Model, AppError> {
+    if input.is_empty() {
+        return Err(AppError::BadRequest(
+            "informe ao menos um campo para atualizar".to_owned(),
+        ));
+    }
+
+    let current = repository::find_by_id(db, target_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("usuário não encontrado".to_owned()))?;
+
+    let current_role = parse_role(&current.role)?;
+    let new_role = input.role.unwrap_or(current_role);
+    let new_active = input.active.unwrap_or(current.active);
+
+    let new_name = match input.name {
+        Some(name) => {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(AppError::BadRequest("nome é obrigatório".to_owned()));
+            }
+            Some(name.to_owned())
+        }
+        None => None,
+    };
+
+    let new_email = match input.email {
+        Some(email) => {
+            let email = normalize_email(&email);
+            if !is_valid_email(&email) {
+                return Err(AppError::BadRequest("e-mail inválido".to_owned()));
+            }
+            Some(email)
+        }
+        None => None,
+    };
+
+    if let Some(email) = new_email.as_deref()
+        && email != current.email
+        && repository::count_by_email(db, email, target_id).await? > 0
+    {
+        return Err(AppError::Conflict("e-mail já cadastrado".to_owned()));
+    }
+
+    let active_admins = if loses_admin(current_role, new_role, new_active) {
+        repository::count_active_admins(db).await?
+    } else {
+        0
+    };
+
+    ensure_change_allowed(
+        actor.id,
+        target_id,
+        current_role,
+        new_active,
+        new_role,
+        active_admins,
+    )?;
+
+    let bump_token_version = new_role != current_role || new_active != current.active;
+
+    let updated = match repository::update(
+        db,
+        target_id,
+        current.version,
+        new_name,
+        new_email,
+        (new_role != current_role).then_some(new_role),
+        (new_active != current.active).then_some(new_active),
+        bump_token_version,
+    )
+    .await
+    {
+        Ok(updated) => updated,
+        Err(error) if is_unique_violation(&error) => {
+            return Err(AppError::Conflict("e-mail já cadastrado".to_owned()));
+        }
+        Err(error) => return Err(AppError::Database(error)),
+    };
+
+    if updated == 0 {
+        return Err(AppError::Conflict(
+            "usuário foi alterado por outra pessoa; recarregue e tente novamente".to_owned(),
+        ));
+    }
+
+    repository::find_by_id(db, target_id)
+        .await?
+        .ok_or_else(|| AppError::internal("usuário desapareceu após a atualização"))
+}
+
+/// Desativação (soft delete). Repetir a operação é idempotente.
+pub async fn deactivate(
+    db: &DatabaseConnection,
+    actor: &AuthUser,
+    target_id: Uuid,
+) -> Result<(), AppError> {
+    let current = repository::find_by_id(db, target_id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("usuário não encontrado".to_owned()))?;
+
+    if !current.active {
+        return Ok(());
+    }
+
+    let current_role = parse_role(&current.role)?;
+    let active_admins = if current_role == Role::Admin {
+        repository::count_active_admins(db).await?
+    } else {
+        0
+    };
+
+    ensure_change_allowed(
+        actor.id,
+        target_id,
+        current_role,
+        false,
+        current_role,
+        active_admins,
+    )?;
+
+    let updated = repository::update(
+        db,
+        target_id,
+        current.version,
+        None,
+        None,
+        None,
+        Some(false),
+        true,
+    )
+    .await?;
+
+    if updated == 0 {
+        return Err(AppError::Conflict(
+            "usuário foi alterado por outra pessoa; recarregue e tente novamente".to_owned(),
+        ));
+    }
+
+    Ok(())
 }
 
 pub async fn set_role(db: &DatabaseConnection, id: Uuid, role: Role) -> Result<(), AppError> {
@@ -133,6 +316,46 @@ pub async fn require_session(
     Ok(model)
 }
 
+fn loses_admin(current_role: Role, new_role: Role, new_active: bool) -> bool {
+    current_role == Role::Admin && (new_role != Role::Admin || !new_active)
+}
+
+/// Impede auto-rebaixamento/autoexclusão e a remoção do último admin ativo.
+fn ensure_change_allowed(
+    actor_id: Uuid,
+    target_id: Uuid,
+    current_role: Role,
+    new_active: bool,
+    new_role: Role,
+    active_admins: u64,
+) -> Result<(), AppError> {
+    if actor_id == target_id {
+        if !new_active {
+            return Err(AppError::Conflict(
+                "não é possível desativar o próprio usuário".to_owned(),
+            ));
+        }
+        if new_role != current_role {
+            return Err(AppError::Conflict(
+                "não é possível alterar o próprio papel".to_owned(),
+            ));
+        }
+    }
+
+    if loses_admin(current_role, new_role, new_active) && active_admins <= 1 {
+        return Err(AppError::Conflict(
+            "não é possível remover o último administrador ativo".to_owned(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn parse_role(value: &str) -> Result<Role, AppError> {
+    Role::parse(value)
+        .ok_or_else(|| AppError::internal(format!("papel inválido no banco: {value}")))
+}
+
 fn is_valid_email(email: &str) -> bool {
     let (local, domain) = match email.split_once('@') {
         Some(parts) => parts,
@@ -168,5 +391,47 @@ mod tests {
         assert!(!is_valid_email("@b.com"));
         assert!(!is_valid_email("a@"));
         assert!(!is_valid_email("a b@c.com"));
+    }
+
+    #[test]
+    fn nao_permite_auto_desativacao() {
+        let id = Uuid::now_v7();
+        let error = ensure_change_allowed(id, id, Role::Admin, false, Role::Admin, 2);
+        assert!(matches!(error, Err(AppError::Conflict(_))));
+    }
+
+    #[test]
+    fn nao_permite_auto_rebaixamento() {
+        let id = Uuid::now_v7();
+        let error = ensure_change_allowed(id, id, Role::Admin, true, Role::User, 2);
+        assert!(matches!(error, Err(AppError::Conflict(_))));
+    }
+
+    #[test]
+    fn nao_permite_remover_ultimo_admin() {
+        let actor = Uuid::now_v7();
+        let target = Uuid::now_v7();
+
+        let demote = ensure_change_allowed(actor, target, Role::Admin, true, Role::User, 1);
+        assert!(matches!(demote, Err(AppError::Conflict(_))));
+
+        let deactivate = ensure_change_allowed(actor, target, Role::Admin, false, Role::Admin, 1);
+        assert!(matches!(deactivate, Err(AppError::Conflict(_))));
+    }
+
+    #[test]
+    fn permite_alterar_quando_ha_outro_admin() {
+        let actor = Uuid::now_v7();
+        let target = Uuid::now_v7();
+
+        assert!(ensure_change_allowed(actor, target, Role::Admin, true, Role::User, 2).is_ok());
+        assert!(ensure_change_allowed(actor, target, Role::Admin, false, Role::Admin, 2).is_ok());
+        assert!(ensure_change_allowed(actor, target, Role::User, false, Role::User, 1).is_ok());
+    }
+
+    #[test]
+    fn admin_pode_editar_a_si_mesmo_sem_mudar_papel() {
+        let id = Uuid::now_v7();
+        assert!(ensure_change_allowed(id, id, Role::Admin, true, Role::Admin, 1).is_ok());
     }
 }

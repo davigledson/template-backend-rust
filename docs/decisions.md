@@ -206,6 +206,30 @@ só com necessidade explícita.
 
 ---
 
+## 2026-11-24 — Validação com extractors próprios
+
+**Contexto**: `axum-valid` valida antes do handler, mas a rejeição padrão não é
+Problem Details.
+
+**Decisão**: `core::extract::{ValidatedJson, ValidatedQuery}` validam com
+`validator` e devolvem `AppError::Validation` (422 `application/problem+json`).
+
+**Consequência**: contrato de erro uniforme; validação declarativa no DTO;
+`axum-valid` saiu das dependências.
+
+---
+
+## 2026-11-24 — OpenAPI gerado do mesmo router
+
+**Decisão**: handlers usam `#[utoipa::path]` e são registrados por `routes!` em
+`OpenApiRouter`; `routes/openapi.rs` adiciona `/api/v1` e serve
+`/api-docs/openapi.json` + Scalar em `/docs`.
+
+**Consequência**: rota e documentação não divergem; testes de contrato falham se
+uma rota sumir. O custo é aprender os atributos do `utoipa` ao criar endpoints.
+
+---
+
 ## 2026-11-24 — `AGENTS.md` como contrato de execução
 
 **Contexto**: decisões no histórico do chat se perdem; documentação longa não é
