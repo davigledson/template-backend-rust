@@ -184,14 +184,14 @@ docs/                       # o "porquê" (AGENTS.md é o contrato)
 
 | Fase | Entrega | Status |
 |---|---|---|
-| 0 | Esqueleto, config, compose, justfile | ✅ |
-| 1 | Core: settings, state, erro, http, health, shutdown | ✅ |
-| 2 | Migration `users`, entidade e migrator | ✅ |
-| 3 | Auth JWT (login/refresh/logout/me) + bootstrap admin | ✅ |
-| 4 | `users` como módulo-referência (CRUD admin) + OpenAPI | ✅ |
-| 5 | Cache Redis no `users` | ⬜ |
-| 6 | Worker + cron | ⬜ |
-| 7 | Testes de integração, métricas, rate limit, Dockerfile | ⬜ |
+| 0 | Esqueleto, config, compose, justfile | ok |
+| 1 | Core: settings, state, erro, http, health, shutdown | ok |
+| 2 | Migration `users`, entidade e migrator | ok |
+| 3 | Auth JWT (login/refresh/logout/me) + bootstrap admin | ok |
+| 4 | `users` como módulo-referência (CRUD admin) + OpenAPI | ok |
+| 5 | Cache Redis no `users` | pendente |
+| 6 | Worker + cron | pendente |
+| 7 | Testes de integração, métricas, rate limit, Dockerfile | pendente |
 
 ## Padrões
 

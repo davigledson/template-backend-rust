@@ -76,6 +76,7 @@ routes → modules/<feature> → core
 - **Transação curta**; efeitos externos (e-mail, webhook) depois do commit.
 - **Sem `utils.rs`.** Helper sem dono vai para `core::<tema>`; com dono, fica no módulo.
 - **Sem repositório genérico** e sem container de DI: `AppState` + `Arc` bastam.
+- **Sem emoji** em código, README, `AGENTS.md`, docs ou mensagens de commit.
 
 ## Camadas
 
