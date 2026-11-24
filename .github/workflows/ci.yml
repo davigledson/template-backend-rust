@@ -60,3 +60,53 @@ jobs:
           context: .
           push: false
           tags: template-backend-rust:ci
+
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      APP__JWT__SECRET: "ci-compose-secret-com-mais-de-32-caracteres"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Valida o compose
+        run: docker compose config --quiet
+
+      - name: Sobe infra e aplica migrations
+        run: |
+          docker compose up -d --build postgres redis
+          docker compose --profile tools run --rm migrate
+
+      - name: Sobe API e worker
+        run: docker compose --profile app up -d --build api worker
+
+      - name: Health, métricas e login
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/health/ready > /dev/null; then break; fi
+            sleep 2
+          done
+
+          curl -fsS http://127.0.0.1:8080/health/ready
+          curl -fsS http://127.0.0.1:8080/health
+
+          for _ in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8080/metrics | grep -q app_email_outbox_pending; then break; fi
+            sleep 2
+          done
+
+          curl -fsS http://127.0.0.1:8080/metrics | grep -E 'axum_http_requests_total|app_email_outbox_pending'
+
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X POST http://127.0.0.1:8080/api/v1/auth/login \
+            -H 'content-type: application/json' \
+            -d '{"email":"ninguem@teste.local","password":"senha-errada-123"}')
+          test "$status" = "401"
+
+      - name: Logs em caso de falha
+        if: failure()
+        run: docker compose --profile app logs --tail=80
+
+      - name: Derruba
+        if: always()
+        run: docker compose --profile app down -v --remove-orphans
