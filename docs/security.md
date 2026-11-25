@@ -159,6 +159,7 @@ interna.
 | Token roubado (refresh) | rotação atômica, hash no Redis, `token_version` e revogação de família no reuso |
 | Repetição de `POST` | `Idempotency-Key` obrigatória em recurso, resposta gravada por 24 h |
 | Escalada de privilégio | permissão checada no servidor; papel validado no banco |
+| Abuso de conta admin | `audit_log` registra autor, ação, alvo, diff e `x-request-id` |
 | Enumeração de contas | mesma resposta para e-mail inexistente/senha errada |
 | Injeção SQL | SeaORM parametrizado; sem SQL concatenado |
 | Vazamento em log | segredo redigido, 5xx genérico, sem PII |
@@ -190,8 +191,26 @@ interna.
 - Redis fora do ar é fail-open: a requisição segue, mas sem garantia de
   idempotência.
 
+## Auditoria
+
+- `audit_log` é append-only (sem update/delete no código) e grava **na mesma
+  transação** da mudança: se a alteração não commitou, o registro também não.
+- Ações registradas: `user.created`, `user.admin_created` (CLI),
+  `user.updated`, `user.role_changed`, `user.status_changed`,
+  `user.password_reset`.
+- `changes` guarda só o diff (`{ "role": { "from": "user", "to": "admin" } }`).
+  Senha, hash e token nunca entram.
+- `actor_id` nulo indica CLI ou job, não requisição HTTP.
+- `GET /api/v1/audit` exige `audit:read` e é somente leitura. Ele valida o JWT,
+  mas **não** confere `token_version`: um admin rebaixado consegue ler até o
+  access token expirar (15 min). Aceitável para leitura, nunca para escrita.
+- Não há FK de `actor_id`/`target_id` para `users`: a auditoria é um retrato
+  histórico e não deve impedir ou acompanhar a remoção do usuário.
+- Não existe expurgo automático. Defina a política de retenção antes de
+  produção; apagar linha de auditoria é decisão explícita, fora da aplicação.
+
 ## Hardening pendente
 
 - [ ] Cabeçalhos de segurança (HSTS, `X-Content-Type-Options`) no proxy.
 - [ ] Rotação de segredo JWT com `kid` (só quando houver necessidade real).
-- [ ] Auditoria de ações administrativas (quem mudou o quê e quando).
+- [x] Auditoria de ações administrativas (quem mudou o quê e quando).

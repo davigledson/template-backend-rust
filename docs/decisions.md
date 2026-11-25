@@ -366,3 +366,40 @@ o cabeçalho em criação. Sessões nunca são cacheadas no Redis de idempotênc
 **Revisitar se**: aparecer `POST` público (ex.: contato, webhook de entrada) em
 que exigir a chave seja atrito desnecessário — aí a exceção entra na mesma lista
 de `/auth`.
+
+---
+
+## 2026-11-24 — Auditoria append-only das ações privilegiadas
+
+**Contexto**: com mais de um admin, o banco registrava que uma linha mudou
+(`updated_at`, `version`), mas não quem mudou. Log de aplicação é efêmero, não é
+transacional e não é consultável; ações da CLI nem passam pelo HTTP.
+
+**Decisão**: tabela `audit_log` append-only, dona do módulo `audit`, gravada na
+mesma transação da mudança via `audit::service::record_user`. Ações
+privilegiadas de `users` (criar, editar, mudar papel, mudar situação, redefinir
+senha) e os comandos da CLI. `changes` guarda só o diff, sem senha/hash/token.
+`GET /api/v1/audit` exige a permissão nova `audit:read`.
+
+**Consequência**: falha ao gravar auditoria derruba a transação de negócio —
+auditoria é requisito, não acessório. Sem FK para `users`, porque o registro é
+um retrato histórico. Sem expurgo automático: retenção é decisão de operação.
+
+**Revisitar se**: o volume exigir particionamento por mês, ou se a leitura
+precisar de `require_session` (hoje só valida o JWT).
+
+---
+
+## 2026-11-24 — A auditoria não cobre ações do próprio usuário
+
+**Contexto**: o usuário pode alterar o próprio nome e a própria senha. Seria
+possível auditar tudo.
+
+**Decisão**: só ações privilegiadas entram. `PATCH /auth/me` e
+`PUT /auth/me/password` ficam fora; a troca de senha já dispara e-mail e sobe
+`token_version`.
+
+**Consequência**: a auditoria responde "quem administrou quem", não "o que cada
+pessoa fez na própria conta". Se um dia houver exigência de rastrear login e
+autoatendimento, isso entra como evento de segurança separado, com retenção
+própria.

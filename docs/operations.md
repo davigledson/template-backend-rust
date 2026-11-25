@@ -97,6 +97,23 @@ Conferir a profundidade sem CLI:
 select status, count(*) from email_outbox group by status order by 2 desc;
 ```
 
+## Auditoria
+
+```bash
+# tudo o que aconteceu com um usuário
+curl -s "http://127.0.0.1:8080/api/v1/audit?targetId=<uuid>" -H "authorization: Bearer <token>"
+
+# o que um admin fez, em um período
+curl -s "http://127.0.0.1:8080/api/v1/audit?actorId=<uuid>&from=2026-11-01T00:00:00Z&to=2026-12-01T00:00:00Z"
+
+# só mudanças de papel
+curl -s "http://127.0.0.1:8080/api/v1/audit?action=user.role_changed"
+```
+
+`actorId` ausente no item significa CLI ou job. A tabela não tem expurgo
+automático; defina retenção antes de produção e nunca edite uma linha por SQL
+sem registrar o motivo.
+
 ## Métricas
 
 `/metrics` é Prometheus, sem autenticação. **Restrinja no proxy**; não exponha

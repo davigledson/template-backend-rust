@@ -367,6 +367,9 @@ O `/api/v1` é aplicado uma única vez em `routes/openapi.rs`, que também gera 
 - Autorização: um teste provando 401 sem token e 403 sem permissão.
 - `POST` de recurso sem `Idempotency-Key` → `400`; com a chave, repetir devolve a
   mesma resposta (inclusive `Location`) sem duplicar.
+- Ação privilegiada grava auditoria na mesma transação
+  (`audit::service::record_user`), com ação do vocabulário fechado e diff sem
+  segredo.
 
 ```bash
 just fmt && just lint && just test

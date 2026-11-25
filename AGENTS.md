@@ -119,7 +119,7 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 ## Auth e permissões
 
 - Papéis: `admin` e `user`. Permissões: `users:read`, `users:write`,
-  `users:delete`, `profile:write`.
+  `users:delete`, `profile:write`, `audit:read`.
 - `AuthUser` (extractor) valida assinatura/expiração e **não consulta o banco**.
 - Rotas sensíveis chamam `users::service::require_session`, que confere `active`,
   `token_version` e papel no banco.
@@ -137,6 +137,11 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
   + nova), ambos com `PROFILE_WRITE` e `require_session`.
 - Troca de senha incrementa `token_version` e derruba **todas** as sessões; não
   emite par novo, o usuário faz login de novo.
+- Auditoria: toda ação privilegiada (criar, editar, mudar papel, desativar,
+  redefinir senha) grava em `audit_log` **na mesma transação**, via
+  `audit::service::record_user`. `changes` leva só o diff, nunca senha, hash ou
+  token. `GET /audit` exige `audit:read`, é somente leitura e não confere
+  `token_version`.
 
 ## E-mail e jobs
 

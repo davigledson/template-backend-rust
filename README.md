@@ -171,7 +171,7 @@ auth.require(USERS_WRITE)?;
 
 | Papel | Permissões |
 |---|---|
-| `admin` | `users:read`, `users:write`, `users:delete`, `profile:write` |
+| `admin` | `users:read`, `users:write`, `users:delete`, `profile:write`, `audit:read` |
 | `user` | `profile:write` |
 
 O extractor `AuthUser` é stateless; rotas sensíveis chamam
@@ -214,6 +214,7 @@ Location: /api/v1/users/01926f3a-...
 | `PATCH /api/v1/users/{id}` | `users:write` | atualiza `name`, `email`, `role`, `active` |
 | `DELETE /api/v1/users/{id}` | `users:delete` | soft delete (`active = false`), idempotente |
 | `PUT /api/v1/users/{id}/password` | `users:write` | redefine a senha e invalida as sessões |
+| `GET /api/v1/audit` | `audit:read` | histórico de ações privilegiadas, com filtros |
 
 Proteções:
 
