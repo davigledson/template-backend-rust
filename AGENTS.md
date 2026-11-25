@@ -296,8 +296,21 @@ Se não couber em uma pasta, o módulo está grande demais.
 
 ## Git
 
-- Commits pequenos, no imperativo; um assunto por commit.
+- **Mensagem de commit em português**, sempre, inclusive em repositório aberto.
+- Formato Conventional Commits: `tipo(escopo): descrição no imperativo`.
+  Tipos: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`,
+  `chore`, `revert`. Escopo é o módulo/tema (`auth`, `audit`, `idempotency`,
+  `config`, `deploy`) ou ausente quando for transversal.
+- Descrição curta (até ~72 caracteres), minúscula, sem ponto final. Detalhe o
+  porquê no corpo, também em português, quando o diff não for óbvio.
+- Um assunto por commit: se a mensagem precisa de "e", provavelmente são dois.
 - Não commitar `.env`, `target/`, segredo ou dado de teste.
+- Histórico publicado não se reescreve para trocar idioma; corrija do commit
+  seguinte em diante.
+- Exemplos:
+  `feat(audit): registra ações privilegiadas em log append-only`
+  `fix(idempotency): exclui /auth do replay e assina pelo sub`
+  `docs(operations): adiciona runbook do outbox`
 - PR descreve contrato, migration, risco e como testar.
 
 ## Diagnóstico
