@@ -92,6 +92,7 @@ pub(super) async fn create(
     let actor = Actor::from_auth(&auth, request_id.0.as_deref());
     let model = users_service::create(
         &state.db,
+        &state.cache,
         actor,
         NewUser {
             name: body.name,

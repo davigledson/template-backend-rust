@@ -1,5 +1,6 @@
 //! Escrita: insert e updates com concorrência otimista.
 
+use chrono::{DateTime, FixedOffset, Utc};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, QueryFilter,
     sea_query::Expr,
@@ -32,6 +33,7 @@ pub async fn update<C>(
     role: Option<Role>,
     active: Option<bool>,
     bump_token_version: bool,
+    reset_verification: bool,
 ) -> Result<u64, DbErr>
 where
     C: ConnectionTrait,
@@ -56,6 +58,12 @@ where
     }
     if bump_token_version {
         query = query.col_expr(Column::TokenVersion, Expr::col(Column::TokenVersion).add(1));
+    }
+    if reset_verification {
+        query = query.col_expr(
+            Column::EmailVerifiedAt,
+            Expr::value(Option::<DateTime<FixedOffset>>::None),
+        );
     }
 
     query.exec(db).await.map(|result| result.rows_affected)
@@ -88,6 +96,23 @@ where
         .col_expr(Column::Version, Expr::col(Column::Version).add(1))
         .col_expr(Column::UpdatedAt, Expr::current_timestamp())
         .filter(Column::Id.eq(id))
+        .exec(db)
+        .await
+        .map(|result| result.rows_affected)
+}
+
+/// Confirma o e-mail apenas se ainda não estava confirmado.
+pub async fn set_email_verified<C>(db: &C, id: Uuid) -> Result<u64, DbErr>
+where
+    C: ConnectionTrait,
+{
+    Entity::update_many()
+        .col_expr(
+            Column::EmailVerifiedAt,
+            Expr::value(Utc::now().fixed_offset()),
+        )
+        .filter(Column::Id.eq(id))
+        .filter(Column::EmailVerifiedAt.is_null())
         .exec(db)
         .await
         .map(|result| result.rows_affected)

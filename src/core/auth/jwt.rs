@@ -1,7 +1,7 @@
 //! Emissão e validação de access tokens (JWT HS256).
 //!
-//! O token carrega `role` e `token_version`. Permissões são derivadas do papel
-//! no servidor; não vão no token.
+//! O token carrega `role`, `token_version` e a família de refresh (`fid`).
+//! Permissões são derivadas do papel no servidor; não vão no token.
 
 use std::time::Duration;
 
@@ -19,6 +19,8 @@ pub struct Claims {
     pub email: String,
     pub role: Role,
     pub token_version: i32,
+    /// Família de refresh: identifica a sessão/dispositivo.
+    pub fid: Uuid,
     pub jti: String,
     pub iat: i64,
     pub exp: i64,
@@ -69,6 +71,7 @@ impl JwtService {
         email: &str,
         role: Role,
         token_version: i32,
+        family_id: Uuid,
     ) -> Result<String, JwtError> {
         let now = Utc::now().timestamp();
         let claims = Claims {
@@ -76,6 +79,7 @@ impl JwtService {
             email: email.to_owned(),
             role,
             token_version,
+            fid: family_id,
             jti: Uuid::new_v4().simple().to_string(),
             iat: now,
             exp: now.saturating_add(self.access_ttl_secs()),
@@ -111,8 +115,9 @@ mod tests {
     fn emite_e_decodifica() {
         let service = JwtService::new(&settings()).expect("jwt");
         let id = Uuid::now_v7();
+        let family_id = Uuid::now_v7();
         let token = service
-            .issue_access(id, "a@b.com", Role::Admin, 3)
+            .issue_access(id, "a@b.com", Role::Admin, 3, family_id)
             .expect("token");
         let claims = service.decode(&token).expect("claims");
 
@@ -120,6 +125,7 @@ mod tests {
         assert_eq!(claims.email, "a@b.com");
         assert_eq!(claims.role, Role::Admin);
         assert_eq!(claims.token_version, 3);
+        assert_eq!(claims.fid, family_id);
         assert!(claims.exp > claims.iat);
     }
 
@@ -127,7 +133,7 @@ mod tests {
     fn rejeita_token_adulterado() {
         let service = JwtService::new(&settings()).expect("jwt");
         let token = service
-            .issue_access(Uuid::now_v7(), "a@b.com", Role::User, 0)
+            .issue_access(Uuid::now_v7(), "a@b.com", Role::User, 0, Uuid::now_v7())
             .expect("token");
         let mut tampered = token.clone();
         tampered.push('x');
@@ -139,7 +145,7 @@ mod tests {
     fn rejeita_token_de_outro_segredo() {
         let service = JwtService::new(&settings()).expect("jwt");
         let token = service
-            .issue_access(Uuid::now_v7(), "a@b.com", Role::User, 0)
+            .issue_access(Uuid::now_v7(), "a@b.com", Role::User, 0, Uuid::now_v7())
             .expect("token");
 
         let mut other = settings();

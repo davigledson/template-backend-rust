@@ -22,6 +22,8 @@ pub struct AuthUser {
     pub email: String,
     pub role: Role,
     pub token_version: i32,
+    /// Família de refresh desta sessão; permite marcar a sessão atual.
+    pub family_id: Uuid,
 }
 
 impl AuthUser {
@@ -69,6 +71,7 @@ impl FromRequestParts<AppState> for AuthUser {
             email: claims.email,
             role: claims.role,
             token_version: claims.token_version,
+            family_id: claims.fid,
         })
     }
 }
@@ -84,6 +87,7 @@ mod tests {
             email: "a@b.com".to_owned(),
             role,
             token_version: 0,
+            family_id: Uuid::now_v7(),
         }
     }
 

@@ -16,6 +16,7 @@ use crate::{
     },
     modules::{
         audit::service::Actor,
+        auth::service as auth_service,
         users::{dto::ChangePasswordRequest, service as users_service},
     },
 };
@@ -48,5 +49,6 @@ pub(super) async fn change(
 
     let actor = Actor::from_auth(&auth, request_id.0.as_deref());
     users_service::set_password(&state.db, actor, id, &body.password).await?;
+    auth_service::clear_sessions(&state, id).await;
     Ok(StatusCode::NO_CONTENT)
 }

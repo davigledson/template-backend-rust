@@ -37,12 +37,18 @@ pub struct Harness {
     _postgres: ContainerAsync<Postgres>,
     _redis: ContainerAsync<Redis>,
     pub db: DatabaseConnection,
+    pub cache: Cache,
     pub server: TestServer,
 }
 
 impl Harness {
     /// Sobe infra, aplica migrations, cria o admin e monta a aplicação.
     pub async fn spawn() -> Self {
+        Self::spawn_with(|_| {}).await
+    }
+
+    /// Igual a `spawn`, permitindo ajustar a configuração antes de montar.
+    pub async fn spawn_with(configure: impl FnOnce(&mut Settings)) -> Self {
         let postgres = Postgres::default()
             .with_tag("18-alpine")
             .start()
@@ -68,8 +74,10 @@ impl Harness {
             format!("postgres://postgres:postgres@127.0.0.1:{pg_port}/postgres");
         settings.redis.url = format!("redis://127.0.0.1:{redis_port}");
         settings.jwt.secret = "segredo-de-integracao-com-mais-de-32-chars".to_owned();
+        configure(&mut settings);
         settings.validate().expect("configuração de teste");
 
+        let cache = Cache::connect(&settings.redis).expect("cache");
         let db = Database::connect(&settings.database.url)
             .await
             .expect("conexão com o postgres");
@@ -77,6 +85,7 @@ impl Harness {
 
         users_service::create(
             &db,
+            &cache,
             Actor::system(),
             NewUser {
                 name: "Admin".to_owned(),
@@ -88,12 +97,11 @@ impl Harness {
         .await
         .expect("admin de teste");
 
-        let cache = Cache::connect(&settings.redis).expect("cache");
         let jwt = JwtService::new(&settings.jwt).expect("jwt");
         let mailer = mail::from_settings(&settings.mail).expect("mailer");
         let server = TestServer::new(app::build(AppState::new(
             db.clone(),
-            cache,
+            cache.clone(),
             jwt,
             mailer,
             Arc::new(settings),
@@ -103,6 +111,7 @@ impl Harness {
             _postgres: postgres,
             _redis: redis,
             db,
+            cache,
             server,
         }
     }
@@ -118,6 +127,7 @@ impl Harness {
     pub async fn create_user(&self, name: &str, email: &str, password: &str) -> Value {
         let model = users_service::create(
             &self.db,
+            &self.cache,
             Actor::system(),
             NewUser {
                 name: name.to_owned(),

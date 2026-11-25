@@ -4,7 +4,7 @@ use crate::{
     core::{
         auth::{
             password,
-            rate_limit::{LimitDecision, LoginRateLimiter},
+            rate_limit::{LimitDecision, RateLimiter},
             role::Role,
         },
         error::AppError,
@@ -21,11 +21,12 @@ use crate::{
     },
 };
 
-#[tracing::instrument(skip(state, request, client_ip))]
+#[tracing::instrument(skip(state, request, client_ip, user_agent))]
 pub async fn login(
     state: &AppState,
     request: LoginRequest,
     client_ip: &str,
+    user_agent: Option<&str>,
 ) -> Result<TokenResponse, AppError> {
     if request.email.trim().is_empty() || request.password.is_empty() {
         return Err(AppError::BadRequest(
@@ -34,9 +35,9 @@ pub async fn login(
     }
 
     let email = users_service::normalize_email(&request.email);
-    let limiter = LoginRateLimiter::new(&state.cache, state.config.rate_limit.window());
-    let account_key = LoginRateLimiter::account_key(&email);
-    let ip_key = LoginRateLimiter::ip_key(client_ip);
+    let limiter = RateLimiter::new(&state.cache, state.config.rate_limit.window());
+    let account_key = RateLimiter::account_key(&email);
+    let ip_key = RateLimiter::ip_key(client_ip);
 
     enforce_limit(
         &limiter,
@@ -65,6 +66,12 @@ pub async fn login(
         return Err(invalid_credentials());
     };
 
+    if state.config.security.require_email_verified && user.email_verified_at.is_none() {
+        return Err(AppError::Forbidden(
+            "confirme seu e-mail antes de entrar".to_owned(),
+        ));
+    }
+
     // Login válido zera as falhas da conta; as do IP seguem até a janela expirar.
     if let Err(error) = limiter.clear(&account_key).await {
         tracing::warn!(error = %error, "falha ao limpar o rate limit da conta");
@@ -73,11 +80,24 @@ pub async fn login(
     let role = Role::parse(&user.role)
         .ok_or_else(|| AppError::internal(format!("papel inválido no banco: {}", user.role)))?;
 
-    issue_tokens(state, &user, role, repository::new_family_id()).await
+    let family_id = repository::new_family_id();
+    let tokens = issue_tokens(state, &user, role, family_id).await?;
+
+    repository::register_session(
+        &state.cache,
+        user.id,
+        family_id,
+        state.config.jwt.refresh_ttl(),
+        client_ip,
+        user_agent,
+    )
+    .await?;
+
+    Ok(tokens)
 }
 
 async fn enforce_limit(
-    limiter: &LoginRateLimiter<'_>,
+    limiter: &RateLimiter<'_>,
     key: &str,
     max_attempts: u32,
     scope: &'static str,
@@ -97,7 +117,7 @@ async fn enforce_limit(
     }
 }
 
-async fn register_failure(limiter: &LoginRateLimiter<'_>, account_key: &str, ip_key: &str) {
+async fn register_failure(limiter: &RateLimiter<'_>, account_key: &str, ip_key: &str) {
     if let Err(error) = limiter.register_failure(account_key).await {
         tracing::warn!(error = %error, "falha ao registrar tentativa de login");
     }

@@ -8,7 +8,7 @@ use std::convert::Infallible;
 use axum::{
     Json,
     extract::{FromRequest, FromRequestParts, Query, Request},
-    http::{HeaderName, request::Parts},
+    http::{HeaderName, header::USER_AGENT, request::Parts},
 };
 use serde::de::DeserializeOwned;
 use validator::Validate;
@@ -19,6 +19,28 @@ use crate::core::{error::AppError, http::REQUEST_ID_HEADER};
 ///
 /// Usado para correlacionar auditoria com o log, sem depender de span.
 pub struct RequestId(pub Option<String>);
+
+/// `User-Agent` da requisição, limitado a 200 caracteres.
+///
+/// Só é usado como metadado de sessão; nunca entra em decisão de autorização.
+pub struct UserAgent(pub Option<String>);
+
+impl<S> FromRequestParts<S> for UserAgent
+where
+    S: Send + Sync,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let value = parts
+            .headers
+            .get(USER_AGENT)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| value.chars().take(200).collect::<String>());
+
+        Ok(Self(value))
+    }
+}
 
 impl<S> FromRequestParts<S> for RequestId
 where

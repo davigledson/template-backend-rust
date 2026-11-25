@@ -43,6 +43,9 @@ smtp_url = ""
 login_account_attempts = 5
 login_ip_attempts = 20
 login_window_secs = 900
+password_reset_account_attempts = 3
+password_reset_ip_attempts = 10
+verification_user_attempts = 3
 
 [jobs]
 enabled = true
@@ -52,6 +55,10 @@ timezone = "America/Sao_Paulo"
 level = "info"
 format = "json"
 ansi = false
+
+[security]
+# Exige e-mail confirmado para entrar. Precisa de e-mail transacional ativo.
+require_email_verified = false
 
 [cors]
 # Em desenvolvimento o perfil adiciona origens locais.

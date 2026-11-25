@@ -1,4 +1,7 @@
 //! Emissão do par de tokens: access JWT + refresh opaco gravado no Redis.
+//!
+//! O registro da sessão (IP/User-Agent) fica com o login: o refresh só
+//! atualiza o último uso, preservando a data de criação.
 
 use uuid::Uuid;
 
@@ -14,10 +17,12 @@ pub(super) async fn issue_tokens(
     role: Role,
     family_id: Uuid,
 ) -> Result<TokenResponse, AppError> {
-    let access_token = state
-        .jwt
-        .issue_access(user.id, &user.email, role, user.token_version)?;
+    let access_token =
+        state
+            .jwt
+            .issue_access(user.id, &user.email, role, user.token_version, family_id)?;
 
+    let ttl = state.config.jwt.refresh_ttl();
     let refresh_token = repository::generate_token();
     repository::store(
         &state.cache,
@@ -25,7 +30,7 @@ pub(super) async fn issue_tokens(
         user.id,
         user.token_version,
         family_id,
-        state.config.jwt.refresh_ttl(),
+        ttl,
     )
     .await?;
 

@@ -18,6 +18,7 @@ mod log;
 mod mail;
 mod rate_limit;
 mod redis;
+mod security;
 mod server;
 
 use std::path::Path;
@@ -37,6 +38,7 @@ pub use log::LogSettings;
 pub use mail::MailSettings;
 pub use rate_limit::RateLimitSettings;
 pub use redis::RedisSettings;
+pub use security::SecuritySettings;
 pub use server::ServerSettings;
 
 const DEFAULT_PROFILE: &str = "development";
@@ -70,6 +72,7 @@ pub struct Settings {
     pub rate_limit: RateLimitSettings,
     pub log: LogSettings,
     pub cors: CorsSettings,
+    pub security: SecuritySettings,
 }
 
 impl Settings {
@@ -143,6 +146,7 @@ impl Default for Settings {
             rate_limit: RateLimitSettings::default(),
             log: LogSettings::default(),
             cors: CorsSettings::default(),
+            security: SecuritySettings::default(),
         }
     }
 }

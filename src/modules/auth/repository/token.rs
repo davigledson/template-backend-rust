@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::{
     core::{cache::Cache, error::AppError},
-    modules::auth::repository::{ConsumeOutcome, ttl_secs},
+    modules::auth::repository::{ConsumeOutcome, RefreshTicket, ttl_secs},
 };
 
 use super::ticket::parse_ticket;
@@ -86,6 +86,17 @@ pub async fn consume(
     })
 }
 
+/// Lê o ticket sem consumir (o logout precisa da família para revogá-la).
+pub async fn peek(cache: &Cache, token: &str) -> Result<Option<RefreshTicket>, AppError> {
+    let mut connection = cache.pool().get().await?;
+    let value: Option<String> = redis::cmd("GET")
+        .arg(key_for(token))
+        .query_async(&mut connection)
+        .await?;
+
+    Ok(value.as_deref().and_then(parse_ticket))
+}
+
 pub async fn revoke(cache: &Cache, token: &str) -> Result<(), AppError> {
     let mut connection = cache.pool().get().await?;
     let _: i64 = redis::cmd("DEL")
@@ -103,7 +114,7 @@ fn used_key_for(token: &str) -> String {
     format!("{USED_PREFIX}{}", hash_token(token))
 }
 
-fn hash_token(token: &str) -> String {
+pub(super) fn hash_token(token: &str) -> String {
     let digest = Sha256::digest(token.as_bytes());
     let mut out = String::with_capacity(digest.len() * 2);
     for byte in digest {

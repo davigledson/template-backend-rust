@@ -87,6 +87,7 @@ pub(super) async fn update(
     let actor = Actor::from_auth(&auth, request_id.0.as_deref());
     let model = users_service::update(
         &state.db,
+        &state.cache,
         actor,
         id,
         UserUpdate {

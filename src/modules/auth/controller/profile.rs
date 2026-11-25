@@ -11,7 +11,10 @@ use crate::{
         state::AppState,
     },
     modules::{
-        auth::dto::{ChangeOwnPasswordRequest, UpdateProfileRequest},
+        auth::{
+            dto::{ChangeOwnPasswordRequest, UpdateProfileRequest},
+            service as auth_service,
+        },
         users::{dto::UserOut, service as users_service},
     },
 };
@@ -92,5 +95,6 @@ pub(super) async fn change_my_password(
         &body.new_password,
     )
     .await?;
+    auth_service::clear_sessions(&state, auth.id).await;
     Ok(StatusCode::NO_CONTENT)
 }

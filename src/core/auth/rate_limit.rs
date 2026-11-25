@@ -1,4 +1,4 @@
-//! Rate limit de login com contadores no Redis.
+//! Rate limit de login e de recuperação de senha com contadores no Redis.
 //!
 //! Janela fixa: a primeira falha cria a chave com TTL; cada falha incrementa.
 //! O bloqueio é verificado **por conta** (e-mail normalizado, hasheado) e por
@@ -14,8 +14,11 @@ use sha2::{Digest, Sha256};
 
 use crate::core::cache::{Cache, CacheError};
 
-const ACCOUNT_PREFIX: &str = "auth:login:fail:account:";
-const IP_PREFIX: &str = "auth:login:fail:ip:";
+const LOGIN_ACCOUNT_PREFIX: &str = "auth:login:fail:account:";
+const LOGIN_IP_PREFIX: &str = "auth:login:fail:ip:";
+const RESET_ACCOUNT_PREFIX: &str = "auth:pwreset:fail:account:";
+const RESET_IP_PREFIX: &str = "auth:pwreset:fail:ip:";
+const VERIFY_PREFIX: &str = "auth:verify:fail:user:";
 
 /// Incrementa e define o TTL apenas na primeira falha da janela.
 const FAILURE_SCRIPT: &str = r"
@@ -32,22 +35,37 @@ pub enum LimitDecision {
     Blocked { retry_after_secs: u64 },
 }
 
-pub struct LoginRateLimiter<'a> {
+pub struct RateLimiter<'a> {
     cache: &'a Cache,
     window: Duration,
 }
 
-impl<'a> LoginRateLimiter<'a> {
+impl<'a> RateLimiter<'a> {
     pub fn new(cache: &'a Cache, window: Duration) -> Self {
         Self { cache, window }
     }
 
     pub fn account_key(normalized_email: &str) -> String {
-        format!("{ACCOUNT_PREFIX}{}", hash_subject(normalized_email))
+        format!("{LOGIN_ACCOUNT_PREFIX}{}", hash_subject(normalized_email))
     }
 
     pub fn ip_key(ip: &str) -> String {
-        format!("{IP_PREFIX}{}", hash_subject(ip))
+        format!("{LOGIN_IP_PREFIX}{}", hash_subject(ip))
+    }
+
+    /// Chave de pedidos de recuperação de senha por conta.
+    pub fn reset_account_key(normalized_email: &str) -> String {
+        format!("{RESET_ACCOUNT_PREFIX}{}", hash_subject(normalized_email))
+    }
+
+    /// Chave de pedidos de recuperação de senha por IP.
+    pub fn reset_ip_key(ip: &str) -> String {
+        format!("{RESET_IP_PREFIX}{}", hash_subject(ip))
+    }
+
+    /// Chave de reenvios de confirmação de e-mail por usuário.
+    pub fn verification_key(user_id: uuid::Uuid) -> String {
+        format!("{VERIFY_PREFIX}{user_id}")
     }
 
     pub async fn check(&self, key: &str, max_attempts: u32) -> Result<LimitDecision, CacheError> {
@@ -110,19 +128,30 @@ mod tests {
 
     #[test]
     fn chave_de_conta_nao_contem_email() {
-        let key = LoginRateLimiter::account_key("ana@teste.local");
-        assert!(key.starts_with(ACCOUNT_PREFIX));
+        let key = RateLimiter::account_key("ana@teste.local");
+        assert!(key.starts_with(LOGIN_ACCOUNT_PREFIX));
         assert!(!key.contains("ana"));
         assert!(!key.contains('@'));
-        assert_eq!(key, LoginRateLimiter::account_key("ana@teste.local"));
-        assert_ne!(key, LoginRateLimiter::account_key("outra@teste.local"));
+        assert_eq!(key, RateLimiter::account_key("ana@teste.local"));
+        assert_ne!(key, RateLimiter::account_key("outra@teste.local"));
     }
 
     #[test]
     fn chave_de_ip_e_estavel() {
-        let key = LoginRateLimiter::ip_key("203.0.113.10");
-        assert!(key.starts_with(IP_PREFIX));
+        let key = RateLimiter::ip_key("203.0.113.10");
+        assert!(key.starts_with(LOGIN_IP_PREFIX));
         assert!(!key.contains("203.0.113.10"));
-        assert_eq!(key, LoginRateLimiter::ip_key("203.0.113.10"));
+        assert_eq!(key, RateLimiter::ip_key("203.0.113.10"));
+    }
+
+    #[test]
+    fn chaves_de_reset_sao_separadas_das_de_login() {
+        let account = RateLimiter::reset_account_key("ana@teste.local");
+        let ip = RateLimiter::reset_ip_key("203.0.113.10");
+
+        assert!(account.starts_with(RESET_ACCOUNT_PREFIX));
+        assert!(ip.starts_with(RESET_IP_PREFIX));
+        assert_ne!(account, RateLimiter::account_key("ana@teste.local"));
+        assert!(RateLimiter::verification_key(uuid::Uuid::nil()).starts_with(VERIFY_PREFIX));
     }
 }

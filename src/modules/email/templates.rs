@@ -43,6 +43,34 @@ pub fn password_changed_by_user(name: &str, to: &str) -> EmailMessage {
     }
 }
 
+pub fn password_reset(name: &str, to: &str, token: &str) -> EmailMessage {
+    EmailMessage {
+        to: to.to_owned(),
+        subject: "Redefinição de senha".to_owned(),
+        body: format!(
+            "Olá, {name}.\n\n\
+             Recebemos um pedido para redefinir a senha da sua conta ({to}).\n\
+             Use o código abaixo para definir a nova senha.\n\n\
+             {token}\n\n\
+             O código vale por 30 minutos e só pode ser usado uma vez.\n\
+             Se não foi você, ignore este e-mail: a senha atual continua valendo.\n"
+        ),
+    }
+}
+
+pub fn verify_email(name: &str, to: &str, token: &str) -> EmailMessage {
+    EmailMessage {
+        to: to.to_owned(),
+        subject: "Confirme seu e-mail".to_owned(),
+        body: format!(
+            "Olá, {name}.\n\n\
+             Confirme o e-mail {to} usando o código abaixo:\n\n\
+             {token}\n\n\
+             O código vale por 7 dias e só pode ser usado uma vez.\n"
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,6 +86,21 @@ mod tests {
     fn aviso_de_senha_tem_assunto_proprio() {
         let message = password_changed("Ana", "ana@teste.local");
         assert_eq!(message.subject, "Sua senha foi alterada");
+    }
+
+    #[test]
+    fn recuperacao_leva_o_codigo_sem_senha() {
+        let message = password_reset("Ana", "ana@teste.local", "abc123");
+        assert!(message.body.contains("abc123"));
+        assert!(message.body.contains("30 minutos"));
+        assert!(!message.body.to_lowercase().contains("senha:"));
+    }
+
+    #[test]
+    fn verificacao_leva_o_codigo() {
+        let message = verify_email("Ana", "ana@teste.local", "def456");
+        assert_eq!(message.subject, "Confirme seu e-mail");
+        assert!(message.body.contains("def456"));
     }
 
     #[test]

@@ -30,6 +30,7 @@ pub async fn update_profile(
         None,
         None,
         false,
+        false,
     )
     .await?;
 

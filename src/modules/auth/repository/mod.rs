@@ -9,6 +9,8 @@
 //! Dividido entre o ciclo do token (`token`) e o marcador de família (`family`).
 
 mod family;
+mod password_reset;
+mod sessions;
 mod ticket;
 mod token;
 
@@ -17,7 +19,12 @@ use std::time::Duration;
 use uuid::Uuid;
 
 pub use family::{is_family_revoked, revoke_family};
-pub use token::{consume, generate_token, new_family_id, revoke, store};
+pub use password_reset::{consume as consume_reset_token, issue as issue_reset_token};
+pub use sessions::{
+    SessionRecord, clear as clear_sessions, list as list_sessions, register as register_session,
+    remove as remove_session, touch as touch_session,
+};
+pub use token::{consume, generate_token, new_family_id, peek, revoke, store};
 
 const FALLBACK_TTL_SECS: i64 = 7 * 24 * 60 * 60;
 

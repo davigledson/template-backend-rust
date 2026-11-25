@@ -28,14 +28,15 @@ async fn fluxo_do_outbox_de_email() {
         .count(db)
         .await
         .expect("contagem do outbox");
-    assert_eq!(pending, 2, "admin + ana");
+    // Cada usuário gera dois e-mails: boas-vindas e confirmação de e-mail.
+    assert_eq!(pending, 4, "admin + ana: boas-vindas + confirmação");
 
     let recording = RecordingMailer::default();
     let summary = email_service::process_pending(db, &recording, 10)
         .await
         .expect("processar outbox");
-    assert_eq!(summary.claimed, 2);
-    assert_eq!(summary.sent, 2);
+    assert_eq!(summary.claimed, 4);
+    assert_eq!(summary.sent, 4);
     assert_eq!(summary.failed, 0);
 
     let subjects = recording.subjects();
@@ -46,13 +47,20 @@ async fn fluxo_do_outbox_de_email() {
             .count(),
         2
     );
+    assert_eq!(
+        subjects
+            .iter()
+            .filter(|subject| *subject == "Confirme seu e-mail")
+            .count(),
+        2
+    );
 
     let sent = Outbox::find()
         .filter(OutboxColumn::Status.eq("sent"))
         .count(db)
         .await
         .expect("enviados");
-    assert_eq!(sent, 2);
+    assert_eq!(sent, 4);
 
     // --- deduplicação pelo dedupe_key ---
     let message = EmailMessage {

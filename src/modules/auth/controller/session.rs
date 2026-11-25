@@ -4,7 +4,10 @@ use axum::{Json, extract::State, http::StatusCode};
 
 use crate::{
     core::{
-        client_ip::ClientIp, error::AppError, extract::ValidatedJson, openapi::Problem,
+        client_ip::ClientIp,
+        error::AppError,
+        extract::{UserAgent, ValidatedJson},
+        openapi::Problem,
         state::AppState,
     },
     modules::auth::{
@@ -30,10 +33,11 @@ use crate::{
 pub(super) async fn login(
     State(state): State<AppState>,
     client_ip: ClientIp,
+    user_agent: UserAgent,
     ValidatedJson(body): ValidatedJson<LoginRequest>,
 ) -> Result<Json<TokenResponse>, AppError> {
     Ok(Json(
-        service::login(&state, body, client_ip.as_str()).await?,
+        service::login(&state, body, client_ip.as_str(), user_agent.0.as_deref()).await?,
     ))
 }
 

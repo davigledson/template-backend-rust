@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::{
     core::{
         auth::{password, role::Role},
+        cache::Cache,
         error::AppError,
     },
     database::entity::users,
@@ -28,9 +29,10 @@ pub struct NewUser {
     pub role: Role,
 }
 
-#[tracing::instrument(skip(db, input))]
+#[tracing::instrument(skip(db, cache, input))]
 pub async fn create(
     db: &DatabaseConnection,
+    cache: &Cache,
     actor: Actor<'_>,
     input: NewUser,
 ) -> Result<users::Model, AppError> {
@@ -64,6 +66,7 @@ pub async fn create(
         active: Set(true),
         token_version: Set(0),
         version: Set(0),
+        email_verified_at: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
     };
@@ -109,5 +112,9 @@ pub async fn create(
     }
 
     txn.commit().await?;
+
+    // Best-effort: a conta existe mesmo se o Redis ou o e-mail falharem.
+    super::verification::send_email_verification(db, cache, &model).await;
+
     Ok(model)
 }

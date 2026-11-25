@@ -52,6 +52,8 @@ pub async fn refresh(state: &AppState, request: RefreshRequest) -> Result<TokenR
     let role = Role::parse(&user.role)
         .ok_or_else(|| AppError::internal(format!("papel inválido no banco: {}", user.role)))?;
 
+    repository::touch_session(&state.cache, user.id, ticket.family_id, ttl).await?;
+
     issue_tokens(state, &user, role, ticket.family_id).await
 }
 
@@ -59,7 +61,14 @@ pub async fn refresh(state: &AppState, request: RefreshRequest) -> Result<TokenR
 pub async fn logout(state: &AppState, request: RefreshRequest) -> Result<(), AppError> {
     let token = request.refresh_token.trim();
     if !token.is_empty() {
+        // Lê a família antes de revogar para apagar também os metadados.
+        let ticket = repository::peek(&state.cache, token).await?;
         repository::revoke(&state.cache, token).await?;
+
+        if let Some(ticket) = ticket {
+            repository::remove_session(&state.cache, ticket.user_id, ticket.family_id).await?;
+            metrics::session_revoked();
+        }
     }
     Ok(())
 }

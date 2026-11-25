@@ -5,7 +5,7 @@ use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use crate::{
-    core::{auth::role::Role, error::AppError},
+    core::{auth::role::Role, cache::Cache, error::AppError},
     database::entity::users,
     modules::{
         audit::service::{Action, Actor, record_user},
@@ -34,9 +34,10 @@ impl UserUpdate {
 }
 
 /// Atualização parcial feita por um administrador.
-#[tracing::instrument(skip(db, input), fields(target_id = %target_id))]
+#[tracing::instrument(skip(db, cache, input), fields(target_id = %target_id))]
 pub async fn update(
     db: &DatabaseConnection,
+    cache: &Cache,
     actor: Actor<'_>,
     target_id: Uuid,
     input: UserUpdate,
@@ -110,6 +111,9 @@ pub async fn update(
     );
 
     let bump_token_version = new_role != current_role || new_active != current.active;
+    let email_changed = new_email
+        .as_deref()
+        .is_some_and(|email| email != current.email);
 
     let updated = match repository::update(
         &txn,
@@ -120,6 +124,7 @@ pub async fn update(
         (new_role != current_role).then_some(new_role),
         (new_active != current.active).then_some(new_active),
         bump_token_version,
+        email_changed,
     )
     .await
     {
@@ -156,6 +161,11 @@ pub async fn update(
         .ok_or_else(|| AppError::internal("usuário desapareceu após a atualização"))?;
 
     txn.commit().await?;
+
+    if email_changed {
+        super::verification::send_email_verification(db, cache, &model).await;
+    }
+
     Ok(model)
 }
 
@@ -201,6 +211,7 @@ pub async fn deactivate(
         None,
         Some(false),
         true,
+        false,
     )
     .await?;
 
@@ -316,6 +327,7 @@ mod tests {
             active,
             token_version: 0,
             version: 0,
+            email_verified_at: None,
             created_at: now,
             updated_at: now,
         }

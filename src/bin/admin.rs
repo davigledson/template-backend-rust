@@ -15,6 +15,7 @@ use sea_orm::DatabaseConnection;
 use template_backend_rust::{
     config::Settings,
     core::auth::{password::MIN_PASSWORD_LEN, role::Role},
+    core::cache::Cache,
     core::mail::mask_email,
     database::connection,
     modules::{
@@ -97,9 +98,12 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let settings = Settings::load_unvalidated()?;
     let db = connection::connect(&settings.database).await?;
+    let cache = Cache::connect(&settings.redis)?;
 
     match cli.command {
-        Command::Create { email, name, force } => create_admin(&db, &email, &name, force).await?,
+        Command::Create { email, name, force } => {
+            create_admin(&db, &cache, &email, &name, force).await?
+        }
         Command::Promote { email } => promote(&db, &email).await?,
         Command::ResetPassword { email } => reset_password(&db, &email).await?,
         Command::Outbox { action } => outbox(&db, action).await?,
@@ -110,6 +114,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn create_admin(
     db: &DatabaseConnection,
+    cache: &Cache,
     email: &str,
     name: &str,
     force: bool,
@@ -124,6 +129,7 @@ async fn create_admin(
     let password = read_password(true)?;
     let user = service::create(
         db,
+        cache,
         Actor::system(),
         NewUser {
             name: name.to_owned(),

@@ -25,6 +25,11 @@ pub const IDEMPOTENCY_CONFLICT: &str = "app_idempotency_conflict_total";
 pub const OUTBOX_PENDING: &str = "app_email_outbox_pending";
 pub const OUTBOX_FAILED: &str = "app_email_outbox_failed";
 pub const OUTBOX_SENT_24H: &str = "app_email_sent_24h";
+pub const PASSWORD_RESET_REQUESTED: &str = "app_password_reset_requested_total";
+pub const PASSWORD_RESET_BLOCKED: &str = "app_password_reset_blocked_total";
+pub const PASSWORD_RESET_COMPLETED: &str = "app_password_reset_completed_total";
+pub const EMAIL_VERIFIED: &str = "app_email_verified_total";
+pub const SESSION_REVOKED: &str = "app_session_revoked_total";
 
 pub fn pair() -> (PrometheusMetricLayer<'static>, PrometheusHandle) {
     static HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
@@ -67,6 +72,30 @@ pub fn idempotency_replay() {
 /// Mesma chave ainda em execução (resposta `409`).
 pub fn idempotency_conflict() {
     counter!(IDEMPOTENCY_CONFLICT).increment(1);
+}
+
+/// Pedido de recuperação recusado pelo rate limit. `scope` é `account` ou `ip`.
+pub fn password_reset_blocked(scope: &'static str) {
+    counter!(PASSWORD_RESET_BLOCKED, "scope" => scope).increment(1);
+}
+
+/// Código de recuperação emitido para uma conta existente.
+pub fn password_reset_requested() {
+    counter!(PASSWORD_RESET_REQUESTED).increment(1);
+}
+
+pub fn password_reset_completed() {
+    counter!(PASSWORD_RESET_COMPLETED).increment(1);
+}
+
+/// E-mail passou de não confirmado para confirmado (transição, não repetição).
+pub fn email_verified() {
+    counter!(EMAIL_VERIFIED).increment(1);
+}
+
+/// Sessão encerrada pelo usuário (logout ou tela de dispositivos).
+pub fn session_revoked() {
+    counter!(SESSION_REVOKED).increment(1);
 }
 
 /// Estado do outbox lido do banco pelo processo da API.

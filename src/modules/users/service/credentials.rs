@@ -1,11 +1,12 @@
-//! Senhas: redefinição pelo administrador e troca pelo próprio usuário.
+//! Senhas: redefinição pelo administrador, recuperação por código e troca pelo
+//! próprio usuário.
 
 use sea_orm::{DatabaseConnection, TransactionTrait};
 use uuid::Uuid;
 
 use crate::{
     core::{
-        auth::{extractor::AuthUser, password},
+        auth::{extractor::AuthUser, hash::email_fingerprint, password},
         error::AppError,
     },
     modules::{
@@ -113,4 +114,63 @@ pub async fn change_own_password(
 
     txn.commit().await?;
     Ok(())
+}
+
+/// Recuperação por código enviado ao e-mail (usuário não autenticado).
+///
+/// O código carrega o `token_version` e o fingerprint do e-mail do momento da
+/// emissão: se a senha, o papel ou o e-mail mudaram depois, ele deixa de valer.
+/// O novo `token_version` derruba todas as sessões existentes.
+pub async fn reset_password_with_code(
+    db: &DatabaseConnection,
+    user_id: Uuid,
+    expected_token_version: i32,
+    expected_email_fingerprint: &str,
+    new_password: &str,
+) -> Result<(), AppError> {
+    password::validate_strength(new_password)
+        .map_err(|error| AppError::BadRequest(error.to_string()))?;
+
+    let password_hash = password::hash(new_password)?;
+    let txn = db.begin().await?;
+
+    let user = repository::find_by_id(&txn, user_id)
+        .await?
+        .filter(|user| {
+            user.active
+                && user.token_version == expected_token_version
+                && email_fingerprint(&user.email) == expected_email_fingerprint
+        })
+        .ok_or_else(invalid_code)?;
+
+    let updated = repository::set_password(&txn, user.id, &password_hash).await?;
+    if updated == 0 {
+        txn.rollback().await?;
+        return Err(invalid_code());
+    }
+
+    // Receber o código no endereço prova a posse da caixa: confirma o e-mail.
+    repository::set_email_verified(&txn, user.id).await?;
+
+    let user = repository::find_by_id(&txn, user_id)
+        .await?
+        .ok_or_else(|| AppError::internal("usuário desapareceu após a troca de senha"))?;
+
+    if let Err(error) = email_service::enqueue(
+        &txn,
+        email_templates::password_changed(&user.name, &user.email),
+        format!("password-changed:{}:{}", user.id, user.token_version),
+    )
+    .await
+    {
+        txn.rollback().await?;
+        return Err(error);
+    }
+
+    txn.commit().await?;
+    Ok(())
+}
+
+fn invalid_code() -> AppError {
+    AppError::BadRequest("código inválido ou expirado".to_owned())
 }
