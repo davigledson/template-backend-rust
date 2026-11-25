@@ -1,8 +1,8 @@
 //! Escrita: insert e updates com concorrência otimista.
 
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, DbErr, EntityTrait,
-    ExprTrait, QueryFilter, sea_query::Expr,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DbErr, EntityTrait, ExprTrait, QueryFilter,
+    sea_query::Expr,
 };
 use uuid::Uuid;
 
@@ -23,8 +23,8 @@ where
 /// O filtro por `version` evita sobrescrever uma alteração concorrente.
 /// `bump_token_version` revoga as sessões do usuário.
 #[allow(clippy::too_many_arguments)]
-pub async fn update(
-    db: &DatabaseConnection,
+pub async fn update<C>(
+    db: &C,
     id: Uuid,
     expected_version: i32,
     name: Option<String>,
@@ -32,7 +32,10 @@ pub async fn update(
     role: Option<Role>,
     active: Option<bool>,
     bump_token_version: bool,
-) -> Result<u64, DbErr> {
+) -> Result<u64, DbErr>
+where
+    C: ConnectionTrait,
+{
     let mut query = Entity::update_many()
         .col_expr(Column::UpdatedAt, Expr::current_timestamp())
         .col_expr(Column::Version, Expr::col(Column::Version).add(1))
@@ -59,7 +62,10 @@ pub async fn update(
 }
 
 /// Atualiza papel e invalida sessões (`token_version`).
-pub async fn set_role(db: &DatabaseConnection, id: Uuid, role: Role) -> Result<u64, DbErr> {
+pub async fn set_role<C>(db: &C, id: Uuid, role: Role) -> Result<u64, DbErr>
+where
+    C: ConnectionTrait,
+{
     Entity::update_many()
         .col_expr(Column::Role, Expr::value(role.as_str()))
         .col_expr(Column::TokenVersion, Expr::col(Column::TokenVersion).add(1))

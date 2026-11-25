@@ -1,6 +1,7 @@
 pub mod m20261124_000001_create_users;
 pub mod m20261124_000002_create_email_outbox;
 pub mod m20261124_000003_add_users_role_index;
+pub mod m20261124_000004_create_audit_log;
 
 use sea_orm_migration::{MigrationTrait, prelude::*};
 
@@ -12,6 +13,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261124_000001_create_users::Migration),
             Box::new(m20261124_000002_create_email_outbox::Migration),
             Box::new(m20261124_000003_add_users_role_index::Migration),
+            Box::new(m20261124_000004_create_audit_log::Migration),
         ]
     }
 }

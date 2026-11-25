@@ -14,13 +14,16 @@ use crate::{
             permission::{USERS_DELETE, USERS_READ, USERS_WRITE},
         },
         error::AppError,
-        extract::ValidatedJson,
+        extract::{RequestId, ValidatedJson},
         openapi::Problem,
         state::AppState,
     },
-    modules::users::{
-        dto::{UpdateUserRequest, UserOut},
-        service::{self as users_service, UserUpdate},
+    modules::{
+        audit::service::Actor,
+        users::{
+            dto::{UpdateUserRequest, UserOut},
+            service::{self as users_service, UserUpdate},
+        },
     },
 };
 
@@ -76,13 +79,15 @@ pub(super) async fn update(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(id): Path<Uuid>,
+    request_id: RequestId,
     ValidatedJson(body): ValidatedJson<UpdateUserRequest>,
 ) -> Result<Json<UserOut>, AppError> {
     super::authorize(&state, &auth, USERS_WRITE).await?;
 
+    let actor = Actor::from_auth(&auth, request_id.0.as_deref());
     let model = users_service::update(
         &state.db,
-        &auth,
+        actor,
         id,
         UserUpdate {
             name: body.name,
@@ -116,8 +121,11 @@ pub(super) async fn delete(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(id): Path<Uuid>,
+    request_id: RequestId,
 ) -> Result<StatusCode, AppError> {
     super::authorize(&state, &auth, USERS_DELETE).await?;
-    users_service::deactivate(&state.db, &auth, id).await?;
+
+    let actor = Actor::from_auth(&auth, request_id.0.as_deref());
+    users_service::deactivate(&state.db, actor, id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

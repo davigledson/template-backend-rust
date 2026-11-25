@@ -12,7 +12,6 @@
 
 mod create;
 mod credentials;
-mod deactivate;
 mod lookup;
 mod profile;
 mod rules;
@@ -21,8 +20,7 @@ mod update;
 
 pub use create::{NewUser, create};
 pub use credentials::{change_own_password, set_password};
-pub use deactivate::deactivate;
 pub use lookup::{find_by_email, find_by_id, list, normalize_email};
 pub use profile::update_profile;
 pub use session::{count_active_admins, require_session};
-pub use update::{UserUpdate, set_role, update};
+pub use update::{UserUpdate, deactivate, set_role, update};

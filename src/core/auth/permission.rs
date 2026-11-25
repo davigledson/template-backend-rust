@@ -23,8 +23,15 @@ pub const USERS_READ: Permission = Permission::new("users:read");
 pub const USERS_WRITE: Permission = Permission::new("users:write");
 pub const USERS_DELETE: Permission = Permission::new("users:delete");
 pub const PROFILE_WRITE: Permission = Permission::new("profile:write");
+pub const AUDIT_READ: Permission = Permission::new("audit:read");
 
-const ADMIN_PERMISSIONS: &[Permission] = &[USERS_READ, USERS_WRITE, USERS_DELETE, PROFILE_WRITE];
+const ADMIN_PERMISSIONS: &[Permission] = &[
+    USERS_READ,
+    USERS_WRITE,
+    USERS_DELETE,
+    PROFILE_WRITE,
+    AUDIT_READ,
+];
 const USER_PERMISSIONS: &[Permission] = &[PROFILE_WRITE];
 
 pub fn permissions_for(role: Role) -> &'static [Permission] {
@@ -49,6 +56,7 @@ mod tests {
         assert!(Role::Admin.can(USERS_READ));
         assert!(Role::Admin.can(USERS_WRITE));
         assert!(Role::Admin.can(USERS_DELETE));
+        assert!(Role::Admin.can(AUDIT_READ));
     }
 
     #[test]
@@ -56,5 +64,6 @@ mod tests {
         assert!(Role::User.can(PROFILE_WRITE));
         assert!(!Role::User.can(USERS_READ));
         assert!(!Role::User.can(USERS_DELETE));
+        assert!(!Role::User.can(AUDIT_READ));
     }
 }

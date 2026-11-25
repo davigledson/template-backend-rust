@@ -62,7 +62,10 @@ pub async fn list(
     Ok((items, total))
 }
 
-pub async fn count_active_admins(db: &DatabaseConnection) -> Result<u64, DbErr> {
+pub async fn count_active_admins<C>(db: &C) -> Result<u64, DbErr>
+where
+    C: ConnectionTrait,
+{
     Entity::find()
         .filter(Column::Role.eq(Role::Admin.as_str()))
         .filter(Column::Active.eq(true))

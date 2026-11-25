@@ -469,11 +469,71 @@ async fn fluxo_de_api() {
         .await;
     empty_patch.assert_status(StatusCode::BAD_REQUEST);
 
+    // --- auditoria ---
+    let audit: Value = server
+        .get(&format!("/api/v1/audit?targetId={ana_id}"))
+        .add_header("authorization", bearer(&admin))
+        .await
+        .json();
+    assert_eq!(audit["total"], 6, "{audit}");
+
+    let created_event: Value = server
+        .get(&format!(
+            "/api/v1/audit?targetId={ana_id}&action=user.created"
+        ))
+        .add_header("authorization", bearer(&admin))
+        .await
+        .json();
+    assert_eq!(created_event["total"], 1);
+    assert_eq!(created_event["items"][0]["actorId"], admin_id);
+    assert_eq!(created_event["items"][0]["actorRole"], "admin");
+    assert!(created_event["items"][0]["requestId"].is_string());
+    assert_eq!(created_event["items"][0]["changes"]["role"], "user");
+    assert!(
+        created_event["items"][0]["changes"]
+            .get("password")
+            .is_none()
+    );
+
+    let role_events: Value = server
+        .get(&format!(
+            "/api/v1/audit?targetId={ana_id}&action=user.role_changed"
+        ))
+        .add_header("authorization", bearer(&admin))
+        .await
+        .json();
+    assert_eq!(role_events["total"], 2);
+
+    let window: Value = server
+        .get("/api/v1/audit?to=2020-01-01T00:00:00Z")
+        .add_header("authorization", bearer(&admin))
+        .await
+        .json();
+    assert_eq!(window["total"], 0);
+
+    let bad_action = server
+        .get("/api/v1/audit?action=user.inventado")
+        .add_header("authorization", bearer(&admin))
+        .await;
+    bad_action.assert_status(StatusCode::BAD_REQUEST);
+    assert!(
+        bad_action
+            .content_type()
+            .starts_with("application/problem+json")
+    );
+
+    let forbidden_audit = server
+        .get("/api/v1/audit")
+        .add_header("authorization", bearer(&final_access))
+        .await;
+    forbidden_audit.assert_status(StatusCode::FORBIDDEN);
+
     // --- documentação ---
     let spec: Value = server.get("/api-docs/openapi.json").await.json();
     assert!(spec["paths"]["/api/v1/users"].is_object());
     assert!(spec["paths"]["/api/v1/auth/me"]["patch"].is_object());
     assert!(spec["paths"]["/api/v1/auth/me/password"]["put"].is_object());
+    assert!(spec["paths"]["/api/v1/audit"]["get"].is_object());
     assert!(spec["components"]["securitySchemes"]["bearer"].is_object());
 
     let docs = server.get("/docs").await;

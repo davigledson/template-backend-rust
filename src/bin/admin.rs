@@ -18,6 +18,7 @@ use template_backend_rust::{
     core::mail::mask_email,
     database::connection,
     modules::{
+        audit::service::Actor,
         email::service as email_service,
         users::service::{self, NewUser},
     },
@@ -123,6 +124,7 @@ async fn create_admin(
     let password = read_password(true)?;
     let user = service::create(
         db,
+        Actor::system(),
         NewUser {
             name: name.to_owned(),
             email: email.to_owned(),
@@ -146,7 +148,7 @@ async fn promote(db: &DatabaseConnection, email: &str) -> Result<(), Box<dyn std
         return Ok(());
     }
 
-    service::set_role(db, user.id, Role::Admin).await?;
+    service::set_role(db, Actor::system(), user.id, Role::Admin).await?;
     println!("usuário promovido a admin: {}", user.email);
     Ok(())
 }
@@ -160,7 +162,7 @@ async fn reset_password(
         .ok_or("usuário não encontrado")?;
 
     let password = read_password(true)?;
-    service::set_password(db, user.id, &password).await?;
+    service::set_password(db, Actor::system(), user.id, &password).await?;
     println!("senha redefinida para {}", user.email);
     Ok(())
 }

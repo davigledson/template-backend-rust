@@ -21,7 +21,10 @@ use template_backend_rust::{
         state::AppState,
     },
     migrations::Migrator,
-    modules::users::service::{self as users_service, NewUser},
+    modules::{
+        audit::service::Actor,
+        users::service::{self as users_service, NewUser},
+    },
 };
 use testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
 use testcontainers_modules::{postgres::Postgres, redis::Redis};
@@ -74,6 +77,7 @@ impl Harness {
 
         users_service::create(
             &db,
+            Actor::system(),
             NewUser {
                 name: "Admin".to_owned(),
                 email: ADMIN_EMAIL.to_owned(),
@@ -114,6 +118,7 @@ impl Harness {
     pub async fn create_user(&self, name: &str, email: &str, password: &str) -> Value {
         let model = users_service::create(
             &self.db,
+            Actor::system(),
             NewUser {
                 name: name.to_owned(),
                 email: email.to_owned(),

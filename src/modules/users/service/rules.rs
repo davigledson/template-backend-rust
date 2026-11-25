@@ -40,15 +40,18 @@ pub fn loses_admin(current_role: Role, new_role: Role, new_active: bool) -> bool
 }
 
 /// Impede auto-rebaixamento/autoexclusão e a remoção do último admin ativo.
+///
+/// `actor_id` é `None` quando a ação veio da CLI: sem autor HTTP, não há
+/// auto-alteração a proteger.
 pub fn ensure_change_allowed(
-    actor_id: Uuid,
+    actor_id: Option<Uuid>,
     target_id: Uuid,
     current_role: Role,
     new_active: bool,
     new_role: Role,
     active_admins: u64,
 ) -> Result<(), AppError> {
-    if actor_id == target_id {
+    if actor_id == Some(target_id) {
         if !new_active {
             return Err(AppError::Conflict(
                 "não é possível desativar o próprio usuário".to_owned(),
@@ -91,14 +94,14 @@ mod tests {
     #[test]
     fn nao_permite_auto_desativacao() {
         let id = Uuid::now_v7();
-        let error = ensure_change_allowed(id, id, Role::Admin, false, Role::Admin, 2);
+        let error = ensure_change_allowed(Some(id), id, Role::Admin, false, Role::Admin, 2);
         assert!(matches!(error, Err(AppError::Conflict(_))));
     }
 
     #[test]
     fn nao_permite_auto_rebaixamento() {
         let id = Uuid::now_v7();
-        let error = ensure_change_allowed(id, id, Role::Admin, true, Role::User, 2);
+        let error = ensure_change_allowed(Some(id), id, Role::Admin, true, Role::User, 2);
         assert!(matches!(error, Err(AppError::Conflict(_))));
     }
 
@@ -107,10 +110,11 @@ mod tests {
         let actor = Uuid::now_v7();
         let target = Uuid::now_v7();
 
-        let demote = ensure_change_allowed(actor, target, Role::Admin, true, Role::User, 1);
+        let demote = ensure_change_allowed(Some(actor), target, Role::Admin, true, Role::User, 1);
         assert!(matches!(demote, Err(AppError::Conflict(_))));
 
-        let deactivate = ensure_change_allowed(actor, target, Role::Admin, false, Role::Admin, 1);
+        let deactivate =
+            ensure_change_allowed(Some(actor), target, Role::Admin, false, Role::Admin, 1);
         assert!(matches!(deactivate, Err(AppError::Conflict(_))));
     }
 
@@ -119,14 +123,20 @@ mod tests {
         let actor = Uuid::now_v7();
         let target = Uuid::now_v7();
 
-        assert!(ensure_change_allowed(actor, target, Role::Admin, true, Role::User, 2).is_ok());
-        assert!(ensure_change_allowed(actor, target, Role::Admin, false, Role::Admin, 2).is_ok());
-        assert!(ensure_change_allowed(actor, target, Role::User, false, Role::User, 1).is_ok());
+        assert!(
+            ensure_change_allowed(Some(actor), target, Role::Admin, true, Role::User, 2).is_ok()
+        );
+        assert!(
+            ensure_change_allowed(Some(actor), target, Role::Admin, false, Role::Admin, 2).is_ok()
+        );
+        assert!(
+            ensure_change_allowed(Some(actor), target, Role::User, false, Role::User, 1).is_ok()
+        );
     }
 
     #[test]
     fn admin_pode_editar_a_si_mesmo_sem_mudar_papel() {
         let id = Uuid::now_v7();
-        assert!(ensure_change_allowed(id, id, Role::Admin, true, Role::Admin, 1).is_ok());
+        assert!(ensure_change_allowed(Some(id), id, Role::Admin, true, Role::Admin, 1).is_ok());
     }
 }

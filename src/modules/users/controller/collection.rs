@@ -7,13 +7,16 @@ use crate::{
             permission::{USERS_READ, USERS_WRITE},
         },
         error::AppError,
-        extract::{ValidatedJson, ValidatedQuery},
+        extract::{RequestId, ValidatedJson, ValidatedQuery},
         openapi::Problem,
         state::AppState,
     },
-    modules::users::{
-        dto::{CreateUserRequest, ListUsersQuery, UserOut, UserPage},
-        service::{self as users_service, NewUser},
+    modules::{
+        audit::service::Actor,
+        users::{
+            dto::{CreateUserRequest, ListUsersQuery, UserOut, UserPage},
+            service::{self as users_service, NewUser},
+        },
     },
 };
 use axum::{
@@ -81,12 +84,15 @@ pub(super) async fn list(
 pub(super) async fn create(
     State(state): State<AppState>,
     auth: AuthUser,
+    request_id: RequestId,
     ValidatedJson(body): ValidatedJson<CreateUserRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     super::authorize(&state, &auth, USERS_WRITE).await?;
 
+    let actor = Actor::from_auth(&auth, request_id.0.as_deref());
     let model = users_service::create(
         &state.db,
+        actor,
         NewUser {
             name: body.name,
             email: body.email,

@@ -10,11 +10,14 @@ use crate::{
     core::{
         auth::{extractor::AuthUser, permission::USERS_WRITE},
         error::AppError,
-        extract::ValidatedJson,
+        extract::{RequestId, ValidatedJson},
         openapi::Problem,
         state::AppState,
     },
-    modules::users::{dto::ChangePasswordRequest, service as users_service},
+    modules::{
+        audit::service::Actor,
+        users::{dto::ChangePasswordRequest, service as users_service},
+    },
 };
 
 #[utoipa::path(
@@ -38,9 +41,12 @@ pub(super) async fn change(
     State(state): State<AppState>,
     auth: AuthUser,
     Path(id): Path<Uuid>,
+    request_id: RequestId,
     ValidatedJson(body): ValidatedJson<ChangePasswordRequest>,
 ) -> Result<StatusCode, AppError> {
     super::authorize(&state, &auth, USERS_WRITE).await?;
-    users_service::set_password(&state.db, id, &body.password).await?;
+
+    let actor = Actor::from_auth(&auth, request_id.0.as_deref());
+    users_service::set_password(&state.db, actor, id, &body.password).await?;
     Ok(StatusCode::NO_CONTENT)
 }

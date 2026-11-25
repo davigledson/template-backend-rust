@@ -3,15 +3,40 @@
 //! O erro de validação vira [`AppError::Validation`] (422 em Problem Details),
 //! diferente do `Json`/`Query` padrão do Axum, que responderia texto puro.
 
+use std::convert::Infallible;
+
 use axum::{
     Json,
     extract::{FromRequest, FromRequestParts, Query, Request},
-    http::request::Parts,
+    http::{HeaderName, request::Parts},
 };
 use serde::de::DeserializeOwned;
 use validator::Validate;
 
-use crate::core::error::AppError;
+use crate::core::{error::AppError, http::REQUEST_ID_HEADER};
+
+/// Cabeçalho `x-request-id` da requisição atual.
+///
+/// Usado para correlacionar auditoria com o log, sem depender de span.
+pub struct RequestId(pub Option<String>);
+
+impl<S> FromRequestParts<S> for RequestId
+where
+    S: Send + Sync,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let name = HeaderName::from_static(REQUEST_ID_HEADER);
+        let value = parts
+            .headers
+            .get(&name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+
+        Ok(Self(value))
+    }
+}
 
 /// `Json<T>` com validação do `validator`.
 pub struct ValidatedJson<T>(pub T);

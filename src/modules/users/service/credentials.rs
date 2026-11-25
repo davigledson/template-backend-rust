@@ -9,6 +9,7 @@ use crate::{
         error::AppError,
     },
     modules::{
+        audit::service::{Action, Actor, record_user},
         email::{service as email_service, templates as email_templates},
         users::{repository, service::session::require_session},
     },
@@ -17,6 +18,7 @@ use crate::{
 /// Redefinição feita por um administrador. Invalida as sessões do usuário.
 pub async fn set_password(
     db: &DatabaseConnection,
+    actor: Actor<'_>,
     id: Uuid,
     new_password: &str,
 ) -> Result<(), AppError> {
@@ -42,6 +44,15 @@ pub async fn set_password(
         format!("password-changed:{}:{}", user.id, user.token_version),
     )
     .await
+    {
+        txn.rollback().await?;
+        return Err(error);
+    }
+
+    let changes = serde_json::json!({
+        "tokenVersion": { "to": user.token_version },
+    });
+    if let Err(error) = record_user(&txn, actor, Action::UserPasswordReset, id, Some(changes)).await
     {
         txn.rollback().await?;
         return Err(error);

@@ -2,6 +2,7 @@
 
 use chrono::Utc;
 use sea_orm::{DatabaseConnection, Set, TransactionTrait};
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::{
@@ -11,6 +12,7 @@ use crate::{
     },
     database::entity::users,
     modules::{
+        audit::service::{Action, Actor, record_user},
         email::{service as email_service, templates as email_templates},
         users::{
             repository,
@@ -27,7 +29,11 @@ pub struct NewUser {
 }
 
 #[tracing::instrument(skip(db, input))]
-pub async fn create(db: &DatabaseConnection, input: NewUser) -> Result<users::Model, AppError> {
+pub async fn create(
+    db: &DatabaseConnection,
+    actor: Actor<'_>,
+    input: NewUser,
+) -> Result<users::Model, AppError> {
     let name = input.name.trim();
     let email = normalize_email(&input.email);
 
@@ -82,6 +88,22 @@ pub async fn create(db: &DatabaseConnection, input: NewUser) -> Result<users::Mo
     )
     .await
     {
+        txn.rollback().await?;
+        return Err(error);
+    }
+
+    let action = if actor.id.is_some() {
+        Action::UserCreated
+    } else {
+        Action::UserAdminCreated
+    };
+    let changes = json!({
+        "name": model.name,
+        "email": model.email,
+        "role": model.role,
+    });
+
+    if let Err(error) = record_user(&txn, actor, action, model.id, Some(changes)).await {
         txn.rollback().await?;
         return Err(error);
     }

@@ -24,6 +24,7 @@ use crate::{core::state::AppState, modules};
     tags(
         (name = "auth", description = "Login, refresh, logout e perfil"),
         (name = "users", description = "Gestão de usuários (somente admin)"),
+        (name = "audit", description = "Auditoria de ações privilegiadas (somente admin)"),
     ),
     modifiers(&SecurityAddon),
 )]
