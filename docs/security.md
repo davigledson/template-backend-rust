@@ -32,7 +32,7 @@ Decisões, garantias atuais e o que falta endurecer. Regras de uso diário estã
 |---|---|
 | Algoritmo | HS256 |
 | TTL | 15 min (`jwt.access_ttl_min`) |
-| Claims | `sub`, `email`, `role`, `token_version`, `jti`, `iat`, `exp`, `iss`, `aud` |
+| Claims | `sub`, `email`, `role`, `token_version`, `fid` (família), `jti`, `iat`, `exp`, `iss`, `aud` |
 | Validação | assinatura, `exp`, `iss`, `aud`, leeway de 5 s |
 | Onde é validado | extractor `AuthUser`, sem consultar o banco |
 
@@ -66,12 +66,12 @@ destrutiva. Não use em toda rota: é uma query a mais.
 
 - **Opaco**: 64 caracteres hex (dois UUID v4 sem hífen), sem significado.
 - **Hasheado** com SHA-256 no Redis; o valor em claro só existe no cliente.
-- Valor armazenado: `"{user_id}:{token_version}"`.
+- Valor armazenado: `"{user_id}:{token_version}:{family_id}"`.
 - TTL de 7 dias.
 - **Rotação**: cada refresh consome o token em script atômico (GET + DEL +
   marcador de uso) e emite um novo par da mesma família. Reutilizar um token
   consumido revoga a família e devolve `401`.
-- **Logout** apaga o token do Redis.
+- **Logout** apaga o token do Redis e a entrada de sessão do dispositivo.
 
 ### Revogação em massa
 
@@ -99,6 +99,58 @@ O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
 
 > O marcador de uso fica no Redis pelo mesmo TTL do refresh (7 dias). Reuso
 > revoga a família inteira; um novo login cria outra família e segue válido.
+
+## Recuperação de senha
+
+- `POST /auth/password/forgot` devolve **204 sempre**, exista ou não a conta.
+  Não há enumeração de e-mails; a única resposta diferente é `429` do rate limit
+  (que independe de a conta existir).
+- Código opaco de 64 caracteres hex, 30 minutos, guardado como **hash** no Redis
+  (`auth:pwreset:<sha256>`), consumo atômico `GET` + `DEL`.
+- O valor guardado carrega o `token_version` da emissão e um fingerprint do
+  e-mail. Troca de senha, mudança de papel, desativação ou troca de e-mail
+  invalidam códigos pendentes.
+- A nova senha passa pela mesma política (12+ caracteres) e pelo mesmo Argon2id
+  do login.
+- `POST /auth/password/reset` incrementa `token_version` (derruba todas as
+  sessões), confirma o e-mail (o código foi entregue nele), limpa os metadados
+  de sessão e avisa por e-mail.
+- Rate limit: 3 pedidos por conta e 10 por IP na janela, em chaves separadas das
+  do login.
+- Falha ao enfileirar o e-mail não muda a resposta: fica no log com o
+  destinatário mascarado.
+
+## Confirmação de e-mail
+
+- Código opaco de 7 dias, hash no Redis, uso único.
+- Emitido na criação do usuário e quando o e-mail muda (o e-mail antigo deixa de
+  ser confiável; `email_verified_at` volta a nulo).
+- `POST /auth/email/verify` é público; repetir um código já consumido devolve
+  `400`, confirmar conta já confirmada devolve `204`.
+- `POST /auth/email/resend` exige sessão e é limitado a 3 reenvios por usuário
+  na janela; com e-mail já confirmado é no-op (`204`).
+- `security.require_email_verified = true` faz o login devolver `403` enquanto o
+  e-mail não for confirmado. Padrão `false`: o template não depende de SMTP para
+  funcionar.
+- O envio é best-effort: a conta é criada mesmo se Redis/SMTP falharem; o
+  usuário pode pedir reenvio depois.
+
+## Sessões por dispositivo
+
+- Cada login é uma família de refresh; a família é o identificador de sessão
+  (`fid` no access token).
+- Metadados em `auth:session:<user_id>:<family_id>`: criação, último uso, IP e
+  User-Agent (truncado em 200 caracteres), com o TTL do refresh.
+- `GET /auth/sessions` lista da mais recente para a mais antiga, com `current`
+  marcando a sessão da requisição.
+- `DELETE /auth/sessions/{familyId}` remove a entrada **do próprio usuário**,
+  revoga a família e devolve `404` se não existir. A sessão atual é recusada com
+  `400`: encerrar a própria sessão é `POST /auth/logout`.
+- Metadados são apagados no logout, no reset de senha, na troca de senha e na
+  redefinição pelo admin; o `token_version` já invalida os tokens mesmo que a
+  limpeza do Redis falhe.
+- Reiniciar o Redis derruba sessões e códigos pendentes — consequência aceita do
+  modelo efêmero.
 
 ## Bootstrap de admin
 
@@ -160,7 +212,9 @@ interna.
 | Repetição de `POST` | `Idempotency-Key` obrigatória em recurso, resposta gravada por 24 h |
 | Escalada de privilégio | permissão checada no servidor; papel validado no banco |
 | Abuso de conta admin | `audit_log` registra autor, ação, alvo, diff e `x-request-id` |
-| Enumeração de contas | mesma resposta para e-mail inexistente/senha errada |
+| Enumeração de contas | mesma resposta para e-mail inexistente/senha errada; recuperação devolve 204 sempre |
+| Reset de senha por e-mail | código de uso único, hash no Redis, amarrado ao `token_version` |
+| Sessão esquecida em dispositivo | `GET/DELETE /auth/sessions` com IP e User-Agent; logout revoga a família |
 | Injeção SQL | SeaORM parametrizado; sem SQL concatenado |
 | Vazamento em log | segredo redigido, 5xx genérico, sem PII |
 | Auto-bloqueio do sistema | exclusão/rebaixamento do último admin bloqueado (fase 4) |
@@ -168,7 +222,8 @@ interna.
 ## Rate limit e reuso
 
 - **Janela fixa** de 15 min, contadores no Redis, chaves com hash do e-mail/IP
-  (sem PII no Redis).
+  (sem PII no Redis). Login, recuperação (`auth:pwreset:fail:*`) e reenvio de
+  confirmação (`auth:verify:fail:user:*`) usam chaves separadas.
 - Bloqueio devolve `429` e `Retry-After`; login válido zera as falhas da conta,
   não as do IP.
 - **Fail-open**: Redis indisponível não impede login; o evento vai para o log.
@@ -214,3 +269,8 @@ interna.
 - [ ] Cabeçalhos de segurança (HSTS, `X-Content-Type-Options`) no proxy.
 - [ ] Rotação de segredo JWT com `kid` (só quando houver necessidade real).
 - [x] Auditoria de ações administrativas (quem mudou o quê e quando).
+- [x] Recuperação de senha por e-mail (código opaco de uso único).
+- [x] Verificação de e-mail (opcional no login).
+- [x] Sessões por dispositivo com revogação individual.
+- [ ] Notificar login de dispositivo novo por e-mail.
+- [ ] Exigir e-mail confirmado em produção (virar `true` depois de validar o SMTP).

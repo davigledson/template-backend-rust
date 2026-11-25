@@ -127,6 +127,10 @@ Rate limit e proxy:
 | `rate_limit.login_account_attempts` | 5 | falhas por conta na janela |
 | `rate_limit.login_ip_attempts` | 20 | falhas por IP na janela |
 | `rate_limit.login_window_secs` | 900 | janela fixa de 15 min |
+| `rate_limit.password_reset_account_attempts` | 3 | pedidos de recuperação por conta |
+| `rate_limit.password_reset_ip_attempts` | 10 | pedidos de recuperação por IP |
+| `rate_limit.verification_user_attempts` | 3 | reenvios de confirmação por usuário |
+| `security.require_email_verified` | `false` | exige e-mail confirmado para entrar |
 | `server.trust_proxy_headers` | `false` | lê `X-Forwarded-For`/`X-Real-IP` |
 
 O rate limit é **fail-open**: se o Redis cair, o login continua e o evento vai
@@ -150,17 +154,32 @@ Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
 
 | Rota | O que faz |
 |---|---|
-| `POST /api/v1/auth/login` | e-mail + senha → access token (15 min) + refresh token (7 dias); `429` após 5 falhas na conta |
+| `POST /api/v1/auth/login` | e-mail + senha → access token (15 min) + refresh token (7 dias); `429` após 5 falhas na conta; `403` se o e-mail não estiver confirmado e a exigência estiver ligada |
 | `POST /api/v1/auth/refresh` | rotaciona o par; reutilizar um token consumido revoga a família inteira |
 | `POST /api/v1/auth/logout` | revoga o refresh token (204) |
 | `GET /api/v1/auth/me` | perfil do usuário autenticado (Bearer) |
 | `PATCH /api/v1/auth/me` | altera o próprio nome (`profile:write`) |
 | `PUT /api/v1/auth/me/password` | senha atual + nova; encerra todas as sessões (204) |
+| `POST /api/v1/auth/password/forgot` | envia código de recuperação; **sempre 204**, sem revelar se o e-mail existe |
+| `POST /api/v1/auth/password/reset` | código + nova senha; encerra as sessões (204) |
+| `POST /api/v1/auth/email/verify` | confirma o e-mail com o código recebido (204) |
+| `POST /api/v1/auth/email/resend` | reenvia a confirmação (Bearer, 204) |
+| `GET /api/v1/auth/sessions` | sessões ativas, com IP, dispositivo e `current` |
+| `DELETE /api/v1/auth/sessions/{familyId}` | encerra outra sessão (204) |
 
 - Senha: **Argon2id**, mínimo de 12 caracteres.
-- Access token: JWT HS256 com `sub`, `role`, `token_version`, `jti`, `iat`, `exp`, `iss`, `aud`.
+- Access token: JWT HS256 com `sub`, `role`, `token_version`, `fid` (sessão), `jti`, `iat`, `exp`, `iss`, `aud`.
 - Refresh token: opaco, guardado **hasheado** no Redis, consumido por script atômico (get + delete + marcador de uso) e ligado a uma família. Reuso de token já consumido revoga todos os tokens daquela família.
 - `token_version` sobe ao trocar senha/papel ou desativar: invalida refresh tokens e sessões sensíveis na hora.
+- Recuperação de senha: código opaco de 30 min, guardado como hash no Redis,
+  uso único e amarrado ao `token_version` (trocar a senha invalida códigos
+  pendentes). O pedido devolve 204 mesmo para e-mail inexistente.
+- Confirmação de e-mail: código de 7 dias, uso único. Trocar o e-mail zera a
+  confirmação. Com `security.require_email_verified = true`, o login exige
+  e-mail confirmado (403 até confirmar).
+- Sessões: cada login é uma família de refresh com IP e User-Agent no Redis.
+  `GET /auth/sessions` lista e `DELETE` revoga; a sessão atual só sai pelo
+  logout. Se o Redis reinicia, as sessões (e o código de recuperação) caem junto.
 - A troca da própria senha exige a senha atual, incrementa `token_version` e
   derruba **todas** as sessões, inclusive a que fez a troca; o login é refeito.
 - Papéis: `admin` e `user`. Handlers checam **permissão**, nunca papel:

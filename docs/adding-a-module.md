@@ -370,6 +370,8 @@ O `/api/v1` é aplicado uma única vez em `routes/openapi.rs`, que também gera 
 - Ação privilegiada grava auditoria na mesma transação
   (`audit::service::record_user`), com ação do vocabulário fechado e diff sem
   segredo.
+- Token/segredo de uso único vive no Redis com hash, TTL e consumo atômico;
+  nunca no banco em claro. O usuário precisa poder pedir outro.
 
 ```bash
 just fmt && just lint && just test

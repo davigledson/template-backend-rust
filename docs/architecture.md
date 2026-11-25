@@ -159,6 +159,12 @@ Detalhes de ameaça e decisão estão em [`security.md`](security.md). Em resumo
 - **Perfil próprio** (`PATCH /auth/me`, `PUT /auth/me/password`) usa
   `profile:write`; a troca de senha confere a senha atual e encerra todas as
   sessões via `token_version`.
+- **Recuperação de senha** (`/auth/password/*`) usa código opaco no Redis,
+  sempre responde 204 no pedido e derruba as sessões no reset.
+- **Confirmação de e-mail** (`/auth/email/*`) usa código de 7 dias; exigir no
+  login é configuração (`security.require_email_verified`).
+- **Sessões por dispositivo** (`/auth/sessions`) listam as famílias de refresh
+  com IP/User-Agent e permitem encerrar uma sessão específica.
 
 ## Rate limit, idempotência e métricas
 
@@ -191,7 +197,8 @@ um replay devolveria refresh já rotacionado, o que revogaria a família. A regr
 - Logs estruturados com `x-request-id`; 5xx genérico para o cliente.
 - `/metrics` expõe `axum_http_requests_total`, `..._duration_seconds` e
   `..._pending` (axum-prometheus), mais as métricas de domínio `app_*`:
-  e-mail (fila e enviados em 24 h), login bloqueado/falho, reuso de refresh e
+  e-mail (fila e enviados em 24 h), login bloqueado/falho, reuso de refresh,
+  recuperação de senha, e-mail confirmado, sessão encerrada e
   replay/conflito de idempotência. Nomes e labels vivem em `core/metrics.rs`;
   os gauges de outbox são lidos do banco pela API a cada 30 s, porque o worker
   não serve `/metrics`.

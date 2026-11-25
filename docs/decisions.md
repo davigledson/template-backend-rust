@@ -403,3 +403,68 @@ possível auditar tudo.
 pessoa fez na própria conta". Se um dia houver exigência de rastrear login e
 autoatendimento, isso entra como evento de segurança separado, com retenção
 própria.
+
+---
+
+## 2026-11-25 — Recuperação de senha com código opaco e resposta uniforme
+
+**Contexto**: faltava o caminho de quem esqueceu a senha. Um endpoint que revela
+se o e-mail existe entrega enumeração de contas; um link mágico exige front com
+rota dedicada e muda o contrato de erro.
+
+**Decisão**: `POST /auth/password/forgot` recebe o e-mail e devolve **204
+sempre**. A conta existente recebe um código opaco de 30 minutos (hash no
+Redis, uso único, atômico), entregue pelo outbox. `POST /auth/password/reset`
+recebe código + nova senha, incrementa `token_version` e derruba as sessões. O
+código guarda o `token_version` e o fingerprint do e-mail da emissão: mudança de
+senha, papel ou e-mail o invalida. Consumir o código também confirma o e-mail,
+porque ele só chegou lá se a caixa pertence ao usuário. Rate limit em chaves separadas das do login.
+
+**Consequência**: o front não consegue dizer "e-mail não encontrado" — e não
+deve. O usuário que errou o próprio e-mail não recebe nada e precisa tentar de
+novo. O Redis passa a ser dependência do fluxo: sem ele, recuperação não
+funciona (aceito; o modelo já é efêmero).
+
+**Revisitar se**: o produto exigir deep link com token na URL (aí o código vira
+token de página) ou TTL diferente por risco.
+
+---
+
+## 2026-11-25 — Verificação de e-mail opcional, controlada por configuração
+
+**Contexto**: o template já envia e-mails transacionais, mas exigir confirmação
+no login quebra quem sobe a API sem SMTP.
+
+**Decisão**: `email_verified_at` na tabela `users`; código de 7 dias emitido na
+criação e na troca de e-mail. O login só exige confirmação com
+`security.require_email_verified = true`. Os endpoints de confirmação e reenvio
+existem sempre.
+
+**Consequência**: em desenvolvimento (provider `log`) o fluxo funciona sem SMTP;
+em produção, ligar a exigência é uma decisão de configuração, com um passo de
+rollout. Trocar o e-mail zera a confirmação, porque o endereço novo ainda não
+foi provado.
+
+**Revisitar se**: surgir requisito de bloquear tudo até confirmar (então o
+endpoint de login recusa antes de emitir token e o front precisa de tela de
+"reenviar").
+
+---
+
+## 2026-11-25 — Sessões por dispositivo no Redis, não no banco
+
+**Contexto**: o refresh já é uma família por login. O usuário não tinha como ver
+ou encerrar os outros dispositivos.
+
+**Decisão**: metadados de sessão (`created_at`, `last_seen_at`, IP, User-Agent)
+ficam em `auth:session:<user_id>:<family_id>` no Redis, com o TTL do refresh. O
+`fid` entra no access token para marcar a sessão atual. Encerrar revoga a
+família; a sessão atual só sai por logout.
+
+**Consequência**: nada de tabela de sessões, nada de escrita no Postgres a cada
+refresh — só Redis. Reiniciar o Redis perde a lista (e as sessões), como já
+acontecia. O IP/User-Agent é o que o cliente declarou; serve para o usuário
+reconhecer o dispositivo, não como prova forense.
+
+**Revisitar se**: surgir exigência de auditoria de login persistente ou de
+"confiar neste dispositivo" (aí o registro vai para o banco).

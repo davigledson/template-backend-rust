@@ -137,6 +137,16 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
   + nova), ambos com `PROFILE_WRITE` e `require_session`.
 - Troca de senha incrementa `token_version` e derruba **todas** as sessões; não
   emite par novo, o usuário faz login de novo.
+- Recuperação de senha: `POST /auth/password/forgot` **sempre 204** (sem
+  enumeração); código opaco de 30 min, hash no Redis, uso único e amarrado ao
+  `token_version`. `POST /auth/password/reset` troca a senha e derruba sessões.
+- Confirmação de e-mail: código de 7 dias, uso único; trocar o e-mail zera
+  `email_verified_at`. `security.require_email_verified` (padrão `false`)
+  transforma a confirmação em requisito de login.
+- Sessões por dispositivo: uma entrada por família de refresh no Redis
+  (`auth:session:<user>:<family>`), com IP e User-Agent. `GET/DELETE
+  /auth/sessions` exige `require_session`; a sessão atual só sai pelo logout.
+- Nunca logar código de recuperação/confirmação, refresh token ou senha.
 - Auditoria: toda ação privilegiada (criar, editar, mudar papel, desativar,
   redefinir senha) grava em `audit_log` **na mesma transação**, via
   `audit::service::record_user`. `changes` leva só o diff, nunca senha, hash ou
@@ -187,8 +197,8 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 
 - Argon2id, mínimo de 12 caracteres; nunca logar senha, token ou PII.
 - Limite de body, timeouts, CORS por ambiente e `x-request-id` já estão nas camadas.
-- Rate limit de login e detecção de reuso de refresh estão implementados; ver
-  decisões em `docs/decisions.md` (fail-open e revogação de família).
+- Rate limit de login, recuperação de senha e reenvio de confirmação; detecção
+  de reuso de refresh. Ver decisões em `docs/decisions.md`.
 - `X-Forwarded-For` só é confiável com `server.trust_proxy_headers = true`.
 - Dependência nova: mantida, licença permitida, features mínimas, `cargo deny`.
 - Segredo JWT: mínimo 32 caracteres, só via `APP__JWT__SECRET`.

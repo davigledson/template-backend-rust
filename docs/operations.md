@@ -130,10 +130,17 @@ na internet.
 | `app_refresh_reuse_total` | counter | reuso de refresh (possível roubo ou bug de front) |
 | `app_idempotency_replay_total` | counter | retry legítimo reaproveitado |
 | `app_idempotency_conflict_total` | counter | duas execuções simultâneas com a mesma chave |
+| `app_password_reset_requested_total` | counter | pedidos de recuperação que geraram e-mail |
+| `app_password_reset_blocked_total{scope}` | counter | pedidos recusados por rate limit (conta ou IP) |
+| `app_password_reset_completed_total` | counter | senhas efetivamente redefinidas por código |
+| `app_email_verified_total` | counter | e-mails que passaram de não confirmado para confirmado |
+| `app_session_revoked_total` | counter | sessões encerradas (logout ou tela de dispositivos) |
 
 Alertas que fazem sentido neste tamanho: `app_email_outbox_failed > 0` por
-10 min, `app_refresh_reuse_total` crescendo, `up == 0` no scrape e p95 de
-`/api/v1/auth/login` acima de 1 s.
+10 min, `app_refresh_reuse_total` crescendo, `up == 0` no scrape, p95 de
+`/api/v1/auth/login` acima de 1 s e `app_password_reset_requested_total`
+crescendo sem `app_password_reset_completed_total` (possível abuso ou e-mail
+não entregue).
 
 Os gauges de outbox são recalculados pelo processo da **API** a partir do
 banco: o worker não expõe `/metrics`. Se o worker parar, `pending` sobe e
@@ -143,7 +150,11 @@ banco: o worker não expõe `/metrics`. Se o worker parar, `pending` sobe e
 
 - Chaves: `auth:login:fail:account:<sha256(email)>` e
   `auth:login:fail:ip:<sha256(ip)>`, janela de 15 min configurável.
-- Login válido zera a conta, não o IP.
+- Recuperação de senha: `auth:pwreset:fail:account:*` (3) e
+  `auth:pwreset:fail:ip:*` (10). Reenvio de confirmação:
+  `auth:verify:fail:user:<uuid>` (3).
+- Login válido zera a conta, não o IP. Pedido de recuperação conta na hora,
+  independentemente de a conta existir.
 - Para liberar um usuário legítimo antes da janela:
 
 ```bash
@@ -171,6 +182,9 @@ o usuário pelo log do 429.
 | `/health/ready` 503 | Postgres ou Redis fora | `docker compose ps`, logs do serviço; a API volta sozinha |
 | Login 429 em massa | ataque ou cliente em loop | confirmar em `app_login_blocked_total`; bloquear IP no proxy |
 | E-mail não chega | worker parado ou SMTP fora | `just outbox-list status=pending`, logs do worker |
+| Recuperação devolve 204 e nada chega | conta inexistente/inativa, worker parado ou SMTP fora | conferir `app_password_reset_requested_total` e o outbox |
+| Reset devolve 400 | código expirado, já usado ou senha mudou depois do pedido | pedir outro código (`forgot`) |
+| Login 403 "confirme seu e-mail" | `security.require_email_verified = true` | confirmar pelo e-mail ou desligar a exigência |
 | Outbox `failed` crescendo | provedor rejeitando | ler `last_error`, corrigir e `retry-all` |
 | 409 na criação de usuário | `Idempotency-Key` reutilizada ou e-mail duplicado | conferir o `detail` do Problem |
 | Sessões caíram todas | Redis reiniciado | esperado: refresh é opaco e vive no Redis |
