@@ -48,6 +48,7 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just prod-up` | sobe infra + api + worker de deploy |
 | `just prod-down` | derruba a stack de deploy |
 | `just prod-logs` | acompanha os logs da stack de deploy |
+| `just smoke <url> [token]` | smoke pós-deploy de uma URL publicada |
 | `just admin-create <email> "<nome>" [true]` | cria admin (primeiro, ou outro com `true`) |
 | `just admin-promote <email>` | promove usuário a admin |
 | `just admin-reset-password <email>` | redefine senha e invalida sessões |

@@ -108,7 +108,7 @@ para que cada `v*` passe pelo build e pelo compose antes do release.
 
 ```bash
 # 1. defina os segredos no shell (ou use APP_ENV_FILE)
-export POSTGRES_PASSWORD="$(openssl rand -base64 32)"
+export POSTGRES_PASSWORD="$(openssl rand -hex 32)"
 export APP__DATABASE__URL="postgres://app:${POSTGRES_PASSWORD}@postgres:5432/app"
 export APP__JWT__SECRET="$(openssl rand -base64 48)"
 
@@ -131,11 +131,13 @@ docker compose --project-directory . --env-file /dev/null \
 Verificação:
 
 ```bash
-curl -fsS http://127.0.0.1:8080/health
-curl -fsS http://127.0.0.1:8080/health/ready
-curl -fsS -H "authorization: Bearer $METRICS_TOKEN" \
-  http://127.0.0.1:8080/metrics | head
+just smoke http://127.0.0.1:8080
+# com token de métricas:
+just smoke http://127.0.0.1:8080 "$METRICS_TOKEN"
 ```
+
+O script checa `/health`, `/health/ready`, cabeçalhos de segurança, login
+inválido (`401`) e, quando recebe o token, `/metrics`.
 
 Se `metrics.token` estiver vazio, o `/metrics` fica público; restrinja no proxy
 ou na rede de monitoramento.
@@ -165,11 +167,11 @@ banco, use `just prod-admin promote --email ...`,
 
 ## Smoke pós-deploy
 
-O workflow `.github/workflows/smoke.yml` testa uma URL publicada, não containers
-locais. Ele pode ser disparado manualmente ou chamado por `workflow_call` no
-pipeline de deploy.
+O smoke roda contra uma URL publicada, não contra containers locais. O mesmo
+script (`scripts/smoke.sh`) atende o local e o CI:
 
 ```bash
+just smoke https://api.exemplo.com "$METRICS_TOKEN"
 gh workflow run smoke.yml -f base_url=https://api.exemplo.com
 ```
 
@@ -178,7 +180,42 @@ Verificações:
 - `/health` e `/health/ready`;
 - cabeçalhos de segurança e `Cache-Control: no-store`;
 - login inválido devolvendo `401`;
-- `/metrics` quando o secret `METRICS_TOKEN` existe.
+- `/metrics` quando o token é informado.
+
+No `workflow_dispatch`, `METRICS_TOKEN` só é enviado se existir como secret do
+repositório; no `workflow_call`, o pipeline de deploy passa o valor.
+
+## Rotação de segredos
+
+### `APP__JWT__SECRET`
+
+1. gere um valor novo (`openssl rand -base64 48`) e atualize no secret manager;
+2. recrie a API (`just prod-up`) — o worker não valida access token;
+3. access tokens antigos passam a dar `401` na hora. Refresh tokens continuam
+   válidos (são opacos e vivem no Redis): para forçar todo mundo a relogar,
+   remova as chaves `auth:*` do Redis (ou reinicie o Redis, se as sessões
+   puderem cair);
+4. rode o smoke.
+
+### `POSTGRES_PASSWORD`
+
+`POSTGRES_PASSWORD` só é aplicado quando o volume é criado. Em um banco
+existente, troque a senha do usuário e depois a URL:
+
+```bash
+# no host do deploy, com as variáveis do compose exportadas
+docker compose --project-directory . --env-file /dev/null \
+  -f docker/compose.deploy.yml exec postgres \
+  psql -U app -d app -c "ALTER USER app WITH PASSWORD 'NOVA_SENHA'"
+
+export POSTGRES_PASSWORD='NOVA_SENHA'
+export APP__DATABASE__URL="postgres://app:${POSTGRES_PASSWORD}@postgres:5432/app"
+just prod-up   # recria api/worker com a URL nova
+```
+
+Use senha URL-safe (hex) para não precisar percent-encode. Existe uma janela
+curta em que api/worker ainda usam a senha antiga; se preferir recriar o volume,
+faça backup antes. Confirme com `/health/ready` e `just smoke`.
 
 ## Checklist de segurança
 
@@ -194,6 +231,7 @@ Verificações:
 - [ ] `audit.retention_days` compatível com a política de compliance.
 - [ ] Backup e restore testados (`docs/operations.md`).
 - [ ] Migration aplicada antes da API nova.
+- [ ] Smoke pós-deploy passou (`just smoke <url> [token]`).
 
 ## Rollback
 

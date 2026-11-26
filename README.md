@@ -126,6 +126,7 @@ Regras práticas:
 | `just prod-migrate` / `just prod-up` | stack de deploy: migrations e aplicação |
 | `just prod-admin <args>` | CLI admin na stack de deploy |
 | `just prod-down` / `just prod-logs` | derruba ou acompanha a stack de deploy |
+| `just smoke <url> [token]` | smoke pós-deploy (health, cabeçalhos, login e métricas) |
 | `just dev` | API com logs legíveis |
 | `just worker` | entrega do outbox e limpeza diária (cron) |
 | `just mail-up` / `just mail-down` | Mailpit local: SMTP 1025 e UI 8025 |

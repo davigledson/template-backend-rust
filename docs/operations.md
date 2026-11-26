@@ -43,16 +43,15 @@ docker compose --project-directory . -f docker/compose.deploy.yml \
   --profile app up -d --build api worker
 ```
 
-Verificação em três passos:
+Verificação:
 
 ```bash
-curl -fsS http://127.0.0.1:8080/health          # processo vivo
-curl -fsS http://127.0.0.1:8080/health/ready    # banco e redis respondem
-curl -fsS http://127.0.0.1:8080/metrics | head  # métricas expostas (sem token)
+just smoke http://127.0.0.1:8080 "$APP__METRICS__TOKEN"
 ```
 
-Se `APP__METRICS__TOKEN` estiver definido, use
-`-H "authorization: Bearer <token>"`. O perfil de produção desliga `/docs` por
+O smoke cobre `/health`, `/health/ready`, cabeçalhos de segurança, login
+inválido e, quando recebe o token, `/metrics`. Se `APP__METRICS__TOKEN` estiver
+vazio, a checagem de métricas é pulada. O perfil de produção desliga `/docs` por
 padrão; ligue `APP__DOCS__ENABLED=true` apenas atrás de proteção.
 
 **Rollback**: volte a tag da imagem e suba de novo. Migration é
