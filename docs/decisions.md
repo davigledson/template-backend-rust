@@ -517,6 +517,25 @@ imutável em storage externo.
 
 ---
 
+## 2026-11-26 — CI rápido no PR e jobs pesados fora do caminho
+
+**Contexto**: build Docker e smoke de compose rodavam em todo PR, deixando o
+loop de desenvolvimento lento. A maior parte do trabalho acontece em localhost.
+
+**Decisão**: `quality` (fmt, clippy, nextest, deny) roda em PR e push. `docker` e
+`compose` rodam em `main`, tag `v*` e `workflow_dispatch`. O `smoke.yml` separado
+testa uma URL publicada, via dispatch ou `workflow_call` do deploy. O loop local
+ganhou `just ci-fast`, `just ci-full` e hooks opcionais.
+
+**Consequência**: PR recebe feedback rápido; regressão de imagem/compose é
+detectada antes do release, não a cada commit. O smoke pós-deploy depende de a
+URL e o token de métricas existirem no ambiente.
+
+**Revisitar se**: o número de merges na `main` tornar o build/compose caro, aí
+entra filtro por caminho (`paths`) ou execução noturna.
+
+---
+
 ## 2026-11-25 — Sessões por dispositivo no Redis, não no banco
 
 **Contexto**: o refresh já é uma família por login. O usuário não tinha como ver

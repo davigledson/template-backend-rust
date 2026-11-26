@@ -76,7 +76,10 @@ just dev                      # API em http://localhost:8080
 | `just deny` | licenças, advisories e fontes das dependências |
 | `just entities` | gera entidades a partir do banco |
 | `just docker-build` | imagem de produção multi-stage |
-| `just ci` | fmt + lint + check + test + deny |
+| `just ci` | pipeline completo local: fmt + lint + check + test + deny |
+| `just ci-fast` | feedback rápido: fmt + clippy + check + testes unitários |
+| `just ci-full` | verificação completa antes de push: fmt + clippy + nextest + deny |
+| `just hooks` | instala hooks de pre-commit/pre-push neste clone |
 
 ## Configuração
 
@@ -360,7 +363,9 @@ tests/                      # integração com testcontainers
 ├── email_verification.rs   # reenvio público, troca de e-mail e flag de login
 ├── hardening.rs            # cabeçalhos, no-store, docs e métricas
 └── p2.rs                   # retenção da auditoria, sessões e código anterior
-.github/workflows/ci.yml    # fmt, clippy, nextest, deny e docker build
+.github/workflows/ci.yml    # quality no PR; docker+compose em main/tag/manual
+.github/workflows/smoke.yml # smoke pós-deploy contra BASE_URL
+scripts/                    # hooks locais (pre-commit/pre-push)
 Dockerfile                  # imagem multi-stage, non-root
 
 docs/                       # o "porquê" (AGENTS.md é o contrato)
@@ -369,7 +374,7 @@ docs/                       # o "porquê" (AGENTS.md é o contrato)
 ├── security.md
 ├── testing.md
 ├── operations.md
-└── capacity.md
+├── capacity.md
 └── decisions.md
 ```
 

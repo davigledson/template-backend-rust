@@ -47,7 +47,10 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just outbox-list [status] [limit]` | lista e-mails do outbox |
 | `just outbox-retry <id>` | reprocessa um e-mail na hora |
 | `just outbox-retry-all [status] [force]` | reprocessa todos de um status |
-| `just ci` | fmt + lint + check + test + deny |
+| `just ci` | pipeline completo local |
+| `just ci-fast` | fmt + clippy + check + testes unitários |
+| `just ci-full` | fmt + clippy + nextest + deny |
+| `just hooks` | instala hooks de pre-commit/pre-push |
 
 ## Mapa
 

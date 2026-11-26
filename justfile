@@ -140,5 +140,23 @@ deny:
 docker-build:
     docker build -t template-backend-rust:local .
 
-# Pipeline local equivalente ao CI.
+# Pipeline local completo (mesmo conjunto do job quality).
 ci: fmt lint check test deny
+
+# Feedback rápido do loop local: sem containers.
+ci-fast:
+    cargo fmt --all -- --check
+    cargo clippy --all-targets --all-features -- -D warnings
+    cargo check --all-targets --all-features
+    cargo nextest run --lib
+
+# Verificação completa antes de push: integração + deny.
+ci-full:
+    cargo fmt --all -- --check
+    cargo clippy --all-targets --all-features -- -D warnings
+    cargo nextest run
+    cargo deny check
+
+# Instala hooks de pre-commit/pre-push neste clone.
+hooks:
+    ./scripts/install-git-hooks.sh

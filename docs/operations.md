@@ -49,6 +49,18 @@ assim.
 Regra: nunca `docker compose down -v` em produção — o `-v` apaga o volume
 `pgdata`.
 
+## Smoke pós-deploy
+
+O workflow `smoke.yml` testa uma URL publicada, não containers locais:
+
+```bash
+gh workflow run smoke.yml -f base_url=https://api.exemplo.com
+```
+
+Ele verifica `/health`, `/health/ready`, cabeçalhos de segurança, login inválido
+(`401`) e, quando o secret `METRICS_TOKEN` existe, `/metrics`. O mesmo workflow
+pode ser chamado por `workflow_call` no pipeline de deploy.
+
 ## Backup e restore
 
 O Postgres é a única fonte de verdade. O Redis guarda refresh token, rate

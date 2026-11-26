@@ -22,7 +22,10 @@
 | `just test-unit` | só a lib |
 | `just test-verbose` | com `println!`/`tracing` visíveis |
 | `cargo test nome_do_teste` | um teste específico |
-| `just ci` | fmt + lint + check + test |
+| `just ci-fast` | fmt + clippy + check + testes unitários |
+| `just ci-full` | fmt + clippy + nextest + deny |
+| `just ci` | pipeline completo local |
+| `just hooks` | instala pre-commit/pre-push neste clone |
 
 `nextest` roda cada teste em processo próprio e faz retry de teste instável
 (`nextest.toml`: 1 retry local, 2 no perfil `ci`, timeout de 60 s).
@@ -187,14 +190,28 @@ smoke manual e inspeção visual.
 
 ## CI
 
+O CI é dividido em três momentos:
+
+- **PR:** só o job `quality` (fmt, clippy, nextest e `cargo deny`). É o feedback
+  rápido do desenvolvimento.
+- **`main`, tag `v*` ou manual:** `quality` + `docker` + `compose`. O `docker`
+  builda a imagem de produção e o `compose` sobe Postgres/Redis, aplica
+  migrations, sobe API/worker, checa health/métricas e testa login inválido.
+- **Pós-deploy:** o workflow `smoke.yml` roda contra uma URL real, com
+  `workflow_dispatch` ou `workflow_call` no pipeline de deploy. Ele checa health,
+  cabeçalhos, login inválido e `/metrics` quando `METRICS_TOKEN` está definido.
+
+O loop local deve ser mais rápido que o CI:
+
 ```bash
-just ci     # fmt lint check test deny
+just ci-fast   # fmt + clippy + check + testes unitários (sem containers)
+just ci-full   # nextest completo + deny
+just hooks     # instala pre-commit/pre-push no clone atual
 ```
 
-O workflow `.github/workflows/ci.yml` roda fmt, clippy, nextest, `cargo deny` e
-`docker build`. Testcontainers usa o Docker do runner para Postgres e Redis.
-Falha de lint é falha de build. Teste instável deve ser corrigido, não marcado
-como `#[ignore]` sem justificativa e prazo.
+Testcontainers usa o Docker do runner para Postgres e Redis. Falha de lint é
+falha de build. Teste instável deve ser corrigido, não marcado como `#[ignore]`
+sem justificativa e prazo.
 
 O snapshot do OpenAPI é um teste normal (`routes::openapi`). Mudou o contrato de
 propósito? Rode `INSTA_UPDATE=always cargo test --lib routes::openapi` e revise

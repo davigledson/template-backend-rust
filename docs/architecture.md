@@ -216,8 +216,9 @@ um replay devolveria refresh já rotacionado, o que revogaria a família. A regr
 - `api` e `worker` usam a mesma imagem com comandos diferentes; `migrate` fica
   no perfil `tools` do compose.
 - Migrations não rodam no boot: `docker compose --profile tools run --rm migrate`.
-- CI (`quality` + `docker`) cobre fmt, clippy, nextest, `cargo deny` e build da
-  imagem.
+- CI: `quality` (fmt, clippy, nextest, `cargo deny`) roda em PR; `docker` e
+  `compose` rodam em `main`, tag e manual. O `smoke.yml` testa a URL publicada
+  depois do deploy.
 
 ## E-mail e worker
 
