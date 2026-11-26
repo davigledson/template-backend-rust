@@ -2,7 +2,7 @@ name: smoke
 
 # Smoke pós-deploy: roda contra uma URL real, não contra containers locais.
 # Use manualmente ou chame este workflow no pipeline de deploy com a URL do
-# ambiente publicado.
+# ambiente publicado. O mesmo script roda local: `just smoke <url> [token]`.
 on:
   workflow_dispatch:
     inputs:
@@ -32,32 +32,7 @@ jobs:
       BASE_URL: ${{ inputs.base_url }}
       METRICS_TOKEN: ${{ secrets.METRICS_TOKEN }}
     steps:
-      - name: Normaliza a URL
-        run: echo "BASE_URL=${BASE_URL%/}" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
 
-      - name: Health
-        run: |
-          curl -fsS --retry 3 --retry-delay 2 "$BASE_URL/health"
-          curl -fsS --retry 5 --retry-delay 2 "$BASE_URL/health/ready"
-
-      - name: Cabeçalhos e login inválido
-        run: |
-          headers=$(curl -sS -D - -o /dev/null "$BASE_URL/api/v1/users")
-          printf '%s' "$headers" | grep -qi '^x-content-type-options: nosniff'
-          printf '%s' "$headers" | grep -qi '^cache-control: no-store'
-
-          status=$(curl -sS -o /dev/null -w '%{http_code}' \
-            -X POST "$BASE_URL/api/v1/auth/login" \
-            -H 'content-type: application/json' \
-            -d '{"email":"smoke-nao-existe@example.invalid","password":"senha-errada-123"}')
-          test "$status" = "401"
-
-      - name: Métricas
-        run: |
-          if [ -z "${METRICS_TOKEN:-}" ]; then
-            echo "METRICS_TOKEN não definido; pulando /metrics"
-            exit 0
-          fi
-
-          curl -fsS -H "authorization: Bearer $METRICS_TOKEN" "$BASE_URL/metrics" \
-            | grep -q 'app_email_outbox_pending'
+      - name: Smoke
+        run: ./scripts/smoke.sh "$BASE_URL" "${METRICS_TOKEN:-}"

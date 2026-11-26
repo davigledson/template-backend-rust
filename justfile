@@ -176,6 +176,10 @@ prod-admin +args:
 prod-logs:
     {{compose_deploy}} --profile app logs -f --tail=100
 
+# Smoke pós-deploy (health, cabeçalhos, login inválido e /metrics).
+smoke base_url metrics_token="":
+    ./scripts/smoke.sh "{{base_url}}" "{{metrics_token}}"
+
 # Constrói a imagem de produção.
 docker-build:
     docker build -f docker/Dockerfile -t template-backend-rust:local .
