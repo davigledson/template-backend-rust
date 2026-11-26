@@ -1,15 +1,23 @@
 //! Infra compartilhada dos testes de integração.
 //!
-//! Cada binário de teste sobe seu próprio Postgres e Redis. Container e servidor
-//! vivem dentro do `Harness`; quando ele cai, os containers param.
+//! Com `cargo nextest`, o setup script (`scripts/test-infra.sh`) sobe um
+//! Postgres/Redis por execução e publica `TEST_DATABASE_URL`/`TEST_REDIS_URL`.
+//! Cada `Harness` recebe um banco próprio no Postgres e um DB lógico próprio no
+//! Redis, então os testes continuam isolados e podem rodar em paralelo.
+//!
+//! Sem essas variáveis (ex.: `cargo test`), cai no testcontainers: cada teste
+//! sobe seu par de containers. O fallback também mantém os testes rodando em
+//! ambientes em que o setup script não é executado.
 
 #![allow(dead_code)]
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use axum_test::TestServer;
 use sea_orm::{
-    ColumnTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    ColumnTrait, ConnectionTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder,
 };
 use sea_orm_migration::MigratorTrait;
 use serde_json::{Value, json};
@@ -29,29 +37,43 @@ use template_backend_rust::{
         users::service::{self as users_service, NewUser},
     },
 };
-use testcontainers::{ContainerAsync, ImageExt, runners::AsyncRunner};
+use testcontainers::{ContainerAsync, Image, ImageExt, runners::AsyncRunner};
 use testcontainers_modules::{postgres::Postgres, redis::Redis};
+use uuid::Uuid;
 
 pub const ADMIN_EMAIL: &str = "admin@teste.local";
 pub const ADMIN_PASSWORD: &str = "AdminTeste#2026";
 
-pub struct Harness {
-    // Mantém os containers vivos durante o teste.
-    _postgres: ContainerAsync<Postgres>,
-    _redis: ContainerAsync<Redis>,
-    pub db: DatabaseConnection,
-    pub cache: Cache,
-    pub server: TestServer,
+/// DBs lógicos do Redis de teste; o DB 0 fica com o contador da alocação.
+const REDIS_DATABASES: i64 = 64;
+const PORT_ATTEMPTS: u32 = 10;
+
+struct Infra {
+    postgres_url: String,
+    redis_url: String,
+    containers: Option<(ContainerAsync<Postgres>, ContainerAsync<Redis>)>,
 }
 
-impl Harness {
-    /// Sobe infra, aplica migrations, cria o admin e monta a aplicação.
-    pub async fn spawn() -> Self {
-        Self::spawn_with(|_| {}).await
+impl Infra {
+    async fn start() -> Self {
+        match (
+            std::env::var("TEST_DATABASE_URL"),
+            std::env::var("TEST_REDIS_URL"),
+        ) {
+            (Ok(postgres_url), Ok(redis_url))
+                if !postgres_url.is_empty() && !redis_url.is_empty() =>
+            {
+                Self {
+                    postgres_url,
+                    redis_url,
+                    containers: None,
+                }
+            }
+            _ => Self::start_testcontainers().await,
+        }
     }
 
-    /// Igual a `spawn`, permitindo ajustar a configuração antes de montar.
-    pub async fn spawn_with(configure: impl FnOnce(&mut Settings)) -> Self {
+    async fn start_testcontainers() -> Self {
         let postgres = Postgres::default()
             .with_tag("18-alpine")
             .start()
@@ -63,19 +85,108 @@ impl Harness {
             .await
             .expect("redis");
 
-        let pg_port = postgres
-            .get_host_port_ipv4(5432)
+        Self {
+            postgres_url: format!(
+                "postgres://postgres:postgres@127.0.0.1:{}/postgres",
+                host_port(&postgres, 5432).await
+            ),
+            redis_url: format!("redis://127.0.0.1:{}", host_port(&redis, 6379).await),
+            containers: Some((postgres, redis)),
+        }
+    }
+
+    /// Infra de execução inteira (setup script), não containers por teste.
+    fn shared(&self) -> bool {
+        self.containers.is_none()
+    }
+}
+
+/// `get_host_port_ipv4` pode falhar logo após o start do container; tenta de
+/// novo em vez de derrubar o teste com `PortNotExposed`.
+async fn host_port<I: Image>(container: &ContainerAsync<I>, port: u16) -> u16 {
+    for attempt in 1..=PORT_ATTEMPTS {
+        match container.get_host_port_ipv4(port).await {
+            Ok(value) => return value,
+            Err(error) if attempt == PORT_ATTEMPTS => {
+                panic!("porta {port} do container não foi exposta: {error}");
+            }
+            Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+        }
+    }
+
+    unreachable!("o laço retorna ou entra em pânico")
+}
+
+/// Banco exclusivo do harness; some junto com o teste.
+struct DatabaseHandle {
+    admin_url: String,
+    name: String,
+    shared: bool,
+}
+
+impl Drop for DatabaseHandle {
+    fn drop(&mut self) {
+        if !self.shared {
+            // O container do testcontainers é removido inteiro.
+            return;
+        }
+
+        let admin_url = self.admin_url.clone();
+        let name = self.name.clone();
+
+        // `Drop` é síncrono: a thread com runtime próprio garante o cleanup
+        // antes de o processo do teste encerrar.
+        let _ = std::thread::spawn(move || {
+            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+
+            runtime.block_on(async move {
+                if let Ok(admin) = Database::connect(&admin_url).await {
+                    let sql = format!(r#"DROP DATABASE IF EXISTS "{name}" WITH (FORCE)"#);
+                    let _ = admin.execute_unprepared(&sql).await;
+                }
+            });
+        })
+        .join();
+    }
+}
+
+pub struct Harness {
+    pub db: DatabaseConnection,
+    pub cache: Cache,
+    pub server: TestServer,
+    _database: DatabaseHandle,
+    // Por último: containers só caem depois de pools e cleanup.
+    _infra: Infra,
+}
+
+impl Harness {
+    /// Sobe infra, aplica migrations, cria o admin e monta a aplicação.
+    pub async fn spawn() -> Self {
+        Self::spawn_with(|_| {}).await
+    }
+
+    /// Igual a `spawn`, permitindo ajustar a configuração antes de montar.
+    pub async fn spawn_with(configure: impl FnOnce(&mut Settings)) -> Self {
+        let infra = Infra::start().await;
+        let database_name = format!("it_{}", Uuid::new_v4().simple());
+
+        let admin = Database::connect(&infra.postgres_url)
             .await
-            .expect("porta do postgres");
-        let redis_port = redis
-            .get_host_port_ipv4(6379)
+            .expect("conexão administrativa do postgres");
+        admin
+            .execute_unprepared(&format!(r#"CREATE DATABASE "{database_name}""#))
             .await
-            .expect("porta do redis");
+            .expect("criar banco do teste");
+        drop(admin);
 
         let mut settings = Settings::default();
-        settings.database.url =
-            format!("postgres://postgres:postgres@127.0.0.1:{pg_port}/postgres");
-        settings.redis.url = format!("redis://127.0.0.1:{redis_port}");
+        settings.database.url = postgres_with_database(&infra.postgres_url, &database_name);
+        settings.redis.url = isolated_redis(&infra).await;
         settings.jwt.secret = "segredo-de-integracao-com-mais-de-32-chars".to_owned();
         configure(&mut settings);
         settings.validate().expect("configuração de teste");
@@ -111,11 +222,15 @@ impl Harness {
         )));
 
         Self {
-            _postgres: postgres,
-            _redis: redis,
             db,
             cache,
             server,
+            _database: DatabaseHandle {
+                admin_url: infra.postgres_url.clone(),
+                name: database_name,
+                shared: infra.shared(),
+            },
+            _infra: infra,
         }
     }
 
@@ -143,6 +258,66 @@ impl Harness {
         .expect("usuário de teste");
 
         json!({ "id": model.id.to_string(), "email": model.email })
+    }
+}
+
+/// URL do Postgres apontando para outro banco, preservando a query string.
+fn postgres_with_database(url: &str, database: &str) -> String {
+    let (base, query) = match url.split_once('?') {
+        Some((base, query)) => (base, Some(query)),
+        None => (url, None),
+    };
+    let prefix = base
+        .rsplit_once('/')
+        .map(|(prefix, _)| prefix)
+        .unwrap_or(base);
+    let suffix = query.map(|query| format!("?{query}")).unwrap_or_default();
+
+    format!("{prefix}/{database}{suffix}")
+}
+
+/// Aloca um DB lógico por harness no Redis compartilhado.
+///
+/// O contador fica no DB 0 e o `FLUSHDB` limpa sobras de execuções anteriores.
+async fn isolated_redis(infra: &Infra) -> String {
+    if !infra.shared() {
+        return infra.redis_url.clone();
+    }
+
+    let client = redis::Client::open(infra.redis_url.clone()).expect("cliente redis");
+    let mut connection = client
+        .get_multiplexed_async_connection()
+        .await
+        .expect("conexão com o redis");
+
+    let counter: i64 = redis::cmd("INCR")
+        .arg("test:redis:db-index")
+        .query_async(&mut connection)
+        .await
+        .expect("alocar DB lógico do redis");
+    let index = 1 + (counter - 1).rem_euclid(REDIS_DATABASES - 1);
+
+    let url = redis_with_database(&infra.redis_url, index);
+    let isolated = redis::Client::open(url.clone()).expect("cliente redis isolado");
+    let mut connection = isolated
+        .get_multiplexed_async_connection()
+        .await
+        .expect("conexão com o DB lógico");
+    redis::cmd("FLUSHDB")
+        .query_async::<()>(&mut connection)
+        .await
+        .expect("TEST_REDIS_URL precisa aceitar SELECT (use --databases 64)");
+
+    url
+}
+
+/// Troca (ou acrescenta) o índice de DB lógico em uma URL Redis.
+fn redis_with_database(url: &str, index: i64) -> String {
+    match url.rsplit_once('/') {
+        Some((prefix, tail)) if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) => {
+            format!("{prefix}/{index}")
+        }
+        _ => format!("{}/{index}", url.trim_end_matches('/')),
     }
 }
 

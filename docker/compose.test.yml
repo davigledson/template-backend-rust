@@ -1,12 +1,14 @@
 name: template-backend-rust-test
 
-# Infra opcional para debug manual ou inspeção de um banco de teste.
+# Infra compartilhada dos testes de integração.
 #
-# Os testes normais (`cargo nextest`) usam testcontainers e NÃO leem este
-# arquivo. Use este compose quando quiser um Postgres/Redis efêmero fora do
-# harness, por exemplo para rodar SQL ou reproduzir um cenário à mão.
+# O setup script do nextest (`scripts/test-infra.sh`) sobe este compose uma vez
+# por `cargo nextest run` e publica TEST_DATABASE_URL/TEST_REDIS_URL. Cada teste
+# ganha um banco próprio no Postgres e um DB lógico próprio no Redis
+# (`--databases 64`), então dá para rodar em paralelo sem estado compartilhado.
 #
-# Uso:
+# Sem nextest (ex.: `cargo test`), o harness ignora este arquivo e usa
+# testcontainers. Para inspecionar o banco à mão:
 #   docker compose --project-directory . -f docker/compose.test.yml up -d
 #   docker compose --project-directory . -f docker/compose.test.yml down -v
 services:
@@ -39,6 +41,9 @@ services:
       - "no"
       - --save
       - ""
+      # DB 0 guarda o contador da alocação; 1..=63 ficam com os testes.
+      - --databases
+      - "64"
     ports:
       - "127.0.0.1:${TEST_REDIS_PORT:-56380}:6379"
     healthcheck:

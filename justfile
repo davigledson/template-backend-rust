@@ -2,6 +2,7 @@ set shell := ["bash", "-uc"]
 
 profile := env("APP_PROFILE", "development")
 compose_local := "docker compose --project-directory . -f docker/compose.local.yml"
+compose_test := "docker compose --project-directory . -f docker/compose.test.yml"
 compose_deploy := "docker compose --project-directory . --env-file ${APP_ENV_FILE:-/dev/null} -f docker/compose.deploy.yml"
 
 # Lista os comandos disponíveis.
@@ -112,9 +113,14 @@ fmt:
 lint:
     cargo clippy --all-targets --all-features -- -D warnings
 
-# Roda todos os testes (unit + integração).
+# Roda todos os testes (unit + integração). O nextest sobe a infra de teste uma
+# vez e a mantém de pé; use `just test-down` para derrubar.
 test:
     cargo nextest run
+
+# Derruba a infra compartilhada dos testes de integração.
+test-down:
+    {{compose_test}} down -v --remove-orphans
 
 # Roda apenas os testes unitários da lib.
 test-unit:
