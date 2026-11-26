@@ -32,6 +32,6 @@ pub async fn revoke_family(cache: &Cache, family_id: Uuid, ttl: Duration) -> Res
     Ok(())
 }
 
-fn family_key(family_id: Uuid) -> String {
+pub(super) fn family_key(family_id: Uuid) -> String {
     format!("{FAMILY_PREFIX}{family_id}:revoked")
 }

@@ -10,8 +10,21 @@ use uuid::Uuid;
 
 use crate::core::{cache::Cache, error::AppError};
 
+use super::{family::family_key, ttl_secs};
+
 const PREFIX: &str = "auth:session:";
 const MAX_USER_AGENT: usize = 200;
+
+/// Remove o metadado e revoga a família na mesma operação atômica.
+///
+/// O `EXISTS` inicial garante a posse: uma família de outro usuário não é
+/// revogada só porque o ID foi adivinhado.
+const REVOKE_OWNED_SCRIPT: &str = r"
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+redis.call('DEL', KEYS[1])
+redis.call('SET', KEYS[2], '1', 'EX', ARGV[1])
+return 1
+";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -103,6 +116,24 @@ pub async fn remove(cache: &Cache, user_id: Uuid, family_id: Uuid) -> Result<boo
     let removed: i64 = redis::cmd("DEL")
         .arg(key_for(user_id, family_id))
         .query_async(&mut connection)
+        .await?;
+
+    Ok(removed > 0)
+}
+
+/// Remove o metadado e revoga a família somente se a sessão pertence ao usuário.
+pub async fn revoke_owned(
+    cache: &Cache,
+    user_id: Uuid,
+    family_id: Uuid,
+    ttl: std::time::Duration,
+) -> Result<bool, AppError> {
+    let mut connection = cache.pool().get().await?;
+    let removed: i64 = redis::Script::new(REVOKE_OWNED_SCRIPT)
+        .key(key_for(user_id, family_id))
+        .key(family_key(family_id))
+        .arg(ttl_secs(ttl))
+        .invoke_async(&mut connection)
         .await?;
 
     Ok(removed > 0)

@@ -22,7 +22,7 @@ pub use family::{is_family_revoked, revoke_family};
 pub use password_reset::{consume as consume_reset_token, issue as issue_reset_token};
 pub use sessions::{
     SessionRecord, clear as clear_sessions, list as list_sessions, register as register_session,
-    remove as remove_session, touch as touch_session,
+    remove as remove_session, revoke_owned as revoke_owned_session, touch as touch_session,
 };
 pub use token::{consume, generate_token, new_family_id, peek, revoke, store};
 

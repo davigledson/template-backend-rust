@@ -36,12 +36,18 @@ pub async fn revoke(state: &AppState, auth: &AuthUser, family_id: Uuid) -> Resul
         ));
     }
 
-    // Confere a posse antes de revogar: evita derrubar a sessão de outra conta.
-    if !repository::remove_session(&state.cache, auth.id, family_id).await? {
+    // Confere a posse e revoga a família na mesma operação atômica.
+    if !repository::revoke_owned_session(
+        &state.cache,
+        auth.id,
+        family_id,
+        state.config.jwt.refresh_ttl(),
+    )
+    .await?
+    {
         return Err(AppError::NotFound("sessão não encontrada".to_owned()));
     }
 
-    repository::revoke_family(&state.cache, family_id, state.config.jwt.refresh_ttl()).await?;
     metrics::session_revoked();
     Ok(())
 }
