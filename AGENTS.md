@@ -38,7 +38,11 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just entities` | gera entidades a partir do banco |
 | `just openapi-check` | snapshot do contrato OpenAPI |
 | `just deny` | licenças, advisories e fontes |
-| `just docker-build` | imagem de produção |
+| `just docker-build` | imagem de produção (`docker/Dockerfile`) |
+| `just prod-migrate` | aplica migrations na stack de deploy |
+| `just prod-up` | sobe infra + api + worker de deploy |
+| `just prod-down` | derruba a stack de deploy |
+| `just prod-logs` | acompanha os logs da stack de deploy |
 | `just admin-create <email> "<nome>" [true]` | cria admin (primeiro, ou outro com `true`) |
 | `just admin-promote <email>` | promove usuário a admin |
 | `just admin-reset-password <email>` | redefine senha e invalida sessões |
@@ -66,8 +70,13 @@ src/
 ├── migrations/        migrations in-crate
 ├── modules/           auth, email, users
 ├── jobs/              scheduler do worker
-├── routes/            só faz nest
-└── Dockerfile         imagem multi-stage, non-root
+└── routes/            só faz nest
+
+docker/
+├── Dockerfile         imagem multi-stage, non-root
+├── compose.local.yml  Postgres + Redis + Mailpit de desenvolvimento
+├── compose.deploy.yml api + worker + infra de deploy
+└── compose.test.yml   Postgres/Redis efêmeros para debug manual
 ```
 
 Direção das dependências:
@@ -343,8 +352,9 @@ Se não couber em uma pasta, o módulo está grande demais.
 ## Diagnóstico
 
 - `GET /health` (liveness) e `GET /health/ready` (Postgres + Redis).
-- `just doctor` e `docker compose ps`.
-- Logs: `docker compose logs` (infra) e o log da API; nunca despeje o arquivo inteiro.
+- `just doctor` mostra o estado da infra local; `just prod-up`, `just prod-migrate`
+  e `just prod-logs` operam a stack de deploy.
+- Logs: `just logs` (infra) e o log da API; nunca despeje o arquivo inteiro.
 - Erro 500 só devolve mensagem genérica; o detalhe está no log com `x-request-id`.
 
 ## Links

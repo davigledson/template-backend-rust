@@ -538,6 +538,28 @@ ambiente.
 
 ---
 
+## 2026-11-26 — Arquivos de container em `docker/`, separados por uso
+
+**Contexto**: `Dockerfile` e `docker-compose.yml` na raiz misturavam
+desenvolvimento, deploy e depuração. A maioria dos devs roda a API fora do
+Docker e sobe só a infraestrutura.
+
+**Decisão**: mover tudo para `docker/`, com um arquivo por uso:
+`Dockerfile` (imagem), `compose.local.yml` (Postgres, Redis e Mailpit),
+`compose.deploy.yml` (infra + api + worker + migrate) e `compose.test.yml`
+(Postgres/Redis efêmeros para inspeção manual). Cada compose tem project name
+próprio, para não colidir containers e volumes. Os testes continuam usando
+testcontainers; `compose.test.yml` não é lido pelo `nextest`.
+
+**Consequência**: `just up`, `just prod-up` e o compose de teste ficam
+independentes. Comandos dentro de `docker/` exigem `--project-directory .` para
+manter o `.env` e os caminhos da raiz; os atalhos do `justfile` já fazem isso.
+
+**Revisitar se**: os testes passarem a usar banco externo fixo ou o deploy
+adotar Kubernetes/outro orquestrador.
+
+---
+
 ## 2026-11-25 — Sessões por dispositivo no Redis, não no banco
 
 **Contexto**: o refresh já é uma família por login. O usuário não tinha como ver

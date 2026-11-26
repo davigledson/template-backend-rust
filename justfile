@@ -3,6 +3,8 @@ set dotenv-load := true
 
 profile := env("APP_PROFILE", "development")
 db_url := env("APP__DATABASE__URL", "postgres://app:app@localhost:55432/app")
+compose_local := "docker compose --project-directory . -f docker/compose.local.yml"
+compose_deploy := "docker compose --project-directory . -f docker/compose.deploy.yml"
 
 # Lista os comandos disponíveis.
 default:
@@ -13,7 +15,7 @@ setup:
     @test -f .env || cp .env.example .env
     @grep -q '^APP__JWT__SECRET=.\+' .env || echo "AVISO: preencha APP__JWT__SECRET no .env (openssl rand -base64 48)"
     cargo fetch
-    docker compose up -d
+    {{compose_local}} up -d
     @just doctor
 
 # Mostra versões e o estado da infraestrutura.
@@ -23,24 +25,24 @@ doctor:
     @echo "cargo     $(cargo --version)"
     @echo "just      $(just --version | cut -d' ' -f2)"
     @echo "compose   $(docker compose version --short)"
-    @docker compose ps
+    @{{compose_local}} ps
     @test -f .env && echo ".env      ok" || echo ".env      ausente (rode: just setup)"
 
 # Sobe Postgres e Redis em background.
 up:
-    docker compose up -d
+    {{compose_local}} up -d
 
 # Derruba a infraestrutura (mantém os volumes).
 down:
-    docker compose down
+    {{compose_local}} down
 
 # Derruba a infraestrutura e apaga os volumes.
 reset:
-    docker compose down -v
+    {{compose_local}} down -v
 
 # Acompanha os logs da infraestrutura.
 logs:
-    docker compose logs -f --tail=100
+    {{compose_local}} logs -f --tail=100
 
 # Sobe a API com logs legíveis.
 dev:
@@ -52,12 +54,12 @@ worker:
 
 # Sobe o Mailpit para testar e-mail local (SMTP 1025, UI 8025).
 mail-up:
-    docker compose --profile mail up -d mailpit
+    {{compose_local}} --profile mail up -d mailpit
     @echo "Mailpit: http://localhost:${MAILPIT_UI_PORT:-8025} (SMTP em localhost:${MAILPIT_SMTP_PORT:-1025})"
 
 # Para o Mailpit (mantém o container para reiniciar depois).
 mail-down:
-    docker compose --profile mail stop mailpit
+    {{compose_local}} --profile mail stop mailpit
 
 # Aplica as migrations pendentes.
 migrate:
@@ -136,9 +138,25 @@ openapi-check:
 deny:
     cargo deny check
 
+# Sobe a stack de deploy (infra + api + worker).
+prod-up:
+    {{compose_deploy}} --profile app up -d --build api worker
+
+# Derruba a stack de deploy.
+prod-down:
+    {{compose_deploy}} --profile app down
+
+# Aplica as migrations na stack de deploy.
+prod-migrate:
+    {{compose_deploy}} --profile tools run --rm --build migrate
+
+# Acompanha os logs da stack de deploy.
+prod-logs:
+    {{compose_deploy}} --profile app logs -f --tail=100
+
 # Constrói a imagem de produção.
 docker-build:
-    docker build -t template-backend-rust:local .
+    docker build -f docker/Dockerfile -t template-backend-rust:local .
 
 # Pipeline local completo (mesmo conjunto do job quality).
 ci: fmt lint check test deny

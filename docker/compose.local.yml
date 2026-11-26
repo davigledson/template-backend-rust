@@ -1,0 +1,81 @@
+name: template-backend-rust
+
+# Infraestrutura local: a API e o worker rodam fora do Docker, com cargo/just.
+# Uso:
+#   just up
+#   just mail-up
+#   just down
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    # Orçamento de 2 vCPU / 2 GB: o Postgres fica com a maior fatia.
+    mem_limit: 768m
+    cpus: 1.0
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+      # Orçamento para 2 vCPU / 2 GB; ajuste por projeto.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=40
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    # `maxmemory 128mb` + folga do processo.
+    mem_limit: 160m
+    cpus: 0.5
+    command:
+      - redis-server
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - allkeys-lru
+      - --appendonly
+      - "no"
+      - --save
+      - ""
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-56379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # E-mail local: recebe todo SMTP e mostra em http://localhost:8025.
+  # Ative com: just mail-up
+  mailpit:
+    image: axllent/mailpit:v1.34.0
+    profiles: ["mail"]
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.2
+    ports:
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+
+volumes:
+  pgdata:

@@ -113,7 +113,10 @@ Regras práticas:
 |---|---|
 | `just setup` | prepara `.env`, sobe a infra e baixa dependências |
 | `just doctor` | versões, estado dos containers e do `.env` |
-| `just up` / `just down` / `just reset` | infra (reset apaga volumes) |
+| `just up` / `just down` / `just reset` | infra local (reset apaga volumes) |
+| `just docker-build` | build da imagem em `docker/Dockerfile` |
+| `just prod-migrate` / `just prod-up` | stack de deploy: migrations e aplicação |
+| `just prod-down` / `just prod-logs` | derruba ou acompanha a stack de deploy |
 | `just dev` | API com logs legíveis |
 | `just worker` | entrega do outbox e limpeza diária (cron) |
 | `just mail-up` / `just mail-down` | Mailpit local: SMTP 1025 e UI 8025 |
@@ -414,6 +417,12 @@ src/
 │   └── users/              # dono de users + CRUD admin
 ├── jobs/                   # scheduler do worker: outbox + limpeza
 └── routes/                 # monta health + módulos + docs
+
+docker/
+├── Dockerfile              # imagem de deploy: api, worker e migrator
+├── compose.local.yml       # Postgres + Redis + Mailpit de desenvolvimento
+├── compose.deploy.yml      # infra + api + worker de deploy
+└── compose.test.yml        # Postgres/Redis efêmeros para debug manual
 
 tests/                      # integração com testcontainers
 ├── common/mod.rs           # containers, login, mailers e helpers

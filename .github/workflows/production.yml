@@ -32,6 +32,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: docker/Dockerfile
           push: false
           tags: template-backend-rust:ci
 
@@ -39,20 +40,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
+      COMPOSE: docker compose --project-directory . -f docker/compose.deploy.yml
       APP__JWT__SECRET: "ci-compose-secret-com-mais-de-32-caracteres"
     steps:
       - uses: actions/checkout@v4
 
       - name: Valida o compose
-        run: docker compose config --quiet
+        run: $COMPOSE config --quiet
 
       - name: Sobe infra e aplica migrations
         run: |
-          docker compose up -d --build postgres redis
-          docker compose --profile tools run --rm migrate
+          $COMPOSE up -d --build postgres redis
+          $COMPOSE --profile tools run --rm --build migrate
 
       - name: Sobe API e worker
-        run: docker compose --profile app up -d --build api worker
+        run: $COMPOSE --profile app up -d --build api worker
 
       - name: Health, métricas e login
         run: |
@@ -79,8 +81,8 @@ jobs:
 
       - name: Logs em caso de falha
         if: failure()
-        run: docker compose --profile app logs --tail=80
+        run: $COMPOSE --profile app logs --tail=80
 
       - name: Derruba
         if: always()
-        run: docker compose --profile app down -v --remove-orphans
+        run: $COMPOSE --profile app down -v --remove-orphans

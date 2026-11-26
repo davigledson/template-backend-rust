@@ -18,15 +18,25 @@ e-mail fica `pending` para sempre.
 
 ## Deploy
 
+Todos os comandos abaixo usam `docker/compose.deploy.yml`. Com `just`, os
+atalhos são `just prod-migrate`, `just prod-up`, `just prod-down` e
+`just prod-logs`.
+
 ```bash
-# 1. imagem
-docker compose build
+# 1. schema (explícito, antes de subir a API nova)
+just prod-migrate
 
-# 2. schema (explícito, antes de subir a API nova)
-docker compose --profile tools run --rm migrate
+# 2. aplicação (infra + api + worker)
+just prod-up
+```
 
-# 3. aplicação
-docker compose --profile app up -d
+Equivalente sem `just`:
+
+```bash
+docker compose --project-directory . -f docker/compose.deploy.yml \
+  --profile tools run --rm --build migrate
+docker compose --project-directory . -f docker/compose.deploy.yml \
+  --profile app up -d --build api worker
 ```
 
 Verificação em três passos:
@@ -46,7 +56,7 @@ padrão; ligue `APP__DOCS__ENABLED=true` apenas atrás de proteção.
 a migration for compatível (coluna nullable/default). Escreva migrations
 assim.
 
-Regra: nunca `docker compose down -v` em produção — o `-v` apaga o volume
+Regra: nunca `docker compose --project-directory . -f docker/compose.deploy.yml down -v` em produção — o `-v` apaga o volume
 `pgdata`.
 
 ## Smoke pós-deploy
@@ -69,14 +79,14 @@ bloqueios, mas não corrompe dados.
 
 ```bash
 # backup
-docker compose exec -T postgres pg_dump -U app -Fc app > app-$(date +%F).dump
+docker compose --project-directory . -f docker/compose.deploy.yml exec -T postgres pg_dump -U app -Fc app > app-$(date +%F).dump
 
 # restore (banco vazio, com a API parada)
-docker compose --profile app stop api worker
-docker compose exec -T postgres dropdb -U app --if-exists app
-docker compose exec -T postgres createdb -U app
-docker compose exec -T postgres pg_restore -U app -d app --clean --if-exists < app-2026-11-24.dump
-docker compose --profile app start api worker
+docker compose --project-directory . -f docker/compose.deploy.yml --profile app stop api worker
+docker compose --project-directory . -f docker/compose.deploy.yml exec -T postgres dropdb -U app --if-exists app
+docker compose --project-directory . -f docker/compose.deploy.yml exec -T postgres createdb -U app
+docker compose --project-directory . -f docker/compose.deploy.yml exec -T postgres pg_restore -U app -d app --clean --if-exists < app-2026-11-24.dump
+docker compose --project-directory . -f docker/compose.deploy.yml --profile app start api worker
 ```
 
 Teste o restore de verdade antes de precisar dele. Um dump que nunca foi
@@ -202,8 +212,8 @@ banco: o worker não expõe `/metrics`. Se o worker parar, `pending` sobe e
 
 ```bash
 # descubra pelo log (`scope=account`) e remova só a chave da conta
-docker compose exec redis redis-cli --scan --pattern 'auth:login:fail:account:*'
-docker compose exec redis redis-cli DEL 'auth:login:fail:account:<hash>'
+docker compose --project-directory . -f docker/compose.deploy.yml exec redis redis-cli --scan --pattern 'auth:login:fail:account:*'
+docker compose --project-directory . -f docker/compose.deploy.yml exec redis redis-cli DEL 'auth:login:fail:account:<hash>'
 ```
 
 Cuidado: o hash não revela o e-mail. Prefira esperar a janela ou identificar
@@ -222,7 +232,7 @@ o usuário pelo log do 429.
 
 | Sintoma | Causa provável | Ação |
 |---|---|---|
-| `/health/ready` 503 | Postgres ou Redis fora | `docker compose ps`, logs do serviço; a API volta sozinha |
+| `/health/ready` 503 | Postgres ou Redis fora | `just doctor`, logs do serviço; a API volta sozinha |
 | Login 429 em massa | ataque ou cliente em loop | confirmar em `app_login_blocked_total`; bloquear IP no proxy |
 | E-mail não chega | worker parado ou SMTP fora | `just outbox-list status=pending`, logs do worker |
 | Recuperação devolve 204 e nada chega | conta inexistente/inativa, worker parado ou SMTP fora | conferir `app_password_reset_requested_total` e o outbox |

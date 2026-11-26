@@ -1,5 +1,9 @@
-name: template-backend-rust
+name: template-backend-rust-deploy
 
+# Stack de deploy: aplicação + infraestrutura.
+# Uso (sempre com --project-directory . para manter o .env e os caminhos da raiz):
+#   docker compose --project-directory . -f docker/compose.deploy.yml up -d --build api worker
+#   docker compose --project-directory . -f docker/compose.deploy.yml --profile tools run --rm migrate
 services:
   postgres:
     image: postgres:18-alpine
@@ -11,7 +15,6 @@ services:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app
       POSTGRES_DB: app
-      # Orçamento para 2 vCPU / 2 GB; ajuste por projeto.
       POSTGRES_INITDB_ARGS: "--data-checksums"
     command:
       - postgres
@@ -39,7 +42,6 @@ services:
   redis:
     image: redis:8-alpine
     restart: unless-stopped
-    # `maxmemory 128mb` + folga do processo.
     mem_limit: 160m
     cpus: 0.5
     command:
@@ -60,23 +62,11 @@ services:
       timeout: 3s
       retries: 12
 
-  # E-mail local: recebe todo SMTP e mostra em http://localhost:8025.
-  # Ative com: docker compose --profile mail up -d mailpit
-  mailpit:
-    image: axllent/mailpit:v1.34.0
-    profiles: ["mail"]
-    restart: unless-stopped
-    mem_limit: 128m
-    cpus: 0.2
-    ports:
-      - "127.0.0.1:${MAILPIT_SMTP_PORT:-1025}:1025"
-      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
-
-  # Aplicação e worker usam a mesma imagem; ative com:
-  #   docker compose --profile app up -d
   api:
     profiles: ["app"]
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     command: ["api"]
     mem_limit: 384m
     cpus: 0.9
@@ -89,6 +79,7 @@ services:
       APP__MAIL__FROM: ${APP__MAIL__FROM:-nao-responda@example.com}
       APP__MAIL__SMTP_URL: ${APP__MAIL__SMTP_URL:-}
       APP__SERVER__TRUST_PROXY_HEADERS: ${APP__SERVER__TRUST_PROXY_HEADERS:-false}
+      APP__METRICS__TOKEN: ${APP__METRICS__TOKEN:-}
     ports:
       - "8080:8080"
     depends_on:
@@ -100,7 +91,9 @@ services:
 
   worker:
     profiles: ["app"]
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     command: ["worker"]
     mem_limit: 256m
     cpus: 0.5
@@ -119,10 +112,12 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Migrations são explícitas: docker compose --profile tools run --rm migrate
+  # Migrations são explícitas: --profile tools run --rm migrate
   migrate:
     profiles: ["tools"]
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
     command: ["migrator"]
     mem_limit: 384m
     cpus: 0.5

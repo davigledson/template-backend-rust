@@ -5,7 +5,7 @@ incidentes e métricas), use [`docs/operations.md`](docs/operations.md).
 
 ## Imagem
 
-O `Dockerfile` é multi-stage:
+O `docker/Dockerfile` é multi-stage:
 
 - build em `rust:1.99.1-slim-bookworm`;
 - runtime em `debian:bookworm-slim`;
@@ -13,10 +13,18 @@ O `Dockerfile` é multi-stage:
 - processo roda como usuário `app` (UID 10001), sem privilégios.
 
 `api` e `worker` usam a mesma imagem com comandos diferentes. `migrate` fica no
-perfil `tools` do compose.
+perfil `tools` do compose. Os arquivos ficam em [`docker/`](docker/):
+
+| Arquivo | Uso |
+|---|---|
+| `docker/Dockerfile` | imagem de deploy |
+| `docker/compose.local.yml` | Postgres/Redis/Mailpit no desenvolvimento |
+| `docker/compose.deploy.yml` | stack de deploy |
+| `docker/compose.test.yml` | Postgres/Redis efêmeros para debug manual |
 
 ```bash
 just docker-build
+# equivalente: docker build -f docker/Dockerfile -t template-backend-rust:local .
 ```
 
 ## Variáveis de produção
@@ -53,17 +61,27 @@ Segredos nunca entram no repositório nem em TOML.
 
 ## Compose
 
-Perfis:
+O compose local sobe só a infraestrutura:
+
+```bash
+just up       # Postgres + Redis
+just mail-up  # Mailpit
+just down
+```
+
+O compose de deploy usa os perfis:
 
 | Perfil | Serviços | Uso |
 |---|---|---|
-| (nenhum) | `postgres`, `redis` | infra local |
-| `mail` | `mailpit` | e-mail local, nunca produção |
+| (nenhum) | `postgres`, `redis` | dependências do deploy |
 | `app` | `api`, `worker` | aplicação |
 | `tools` | `migrate` | migrations explícitas |
 
 O worker deve rodar em **uma instância só** para evitar disputa de lease do
 outbox. A API pode ter mais de uma réplica atrás de um proxy.
+
+Sempre use `--project-directory .` com o compose dentro de `docker/`, para
+manter o `.env` da raiz e os caminhos relativos.
 
 ## Gate de produção
 
@@ -82,15 +100,21 @@ para que cada `v*` passe pelo build e pelo compose antes do release.
 ## Passo a passo
 
 ```bash
-# 1. imagem
-docker compose build
+# 1. schema (antes de subir a API nova)
+docker compose --project-directory . -f docker/compose.deploy.yml \
+  --profile tools run --rm --build migrate
 
-# 2. schema (antes de subir a API nova)
-docker compose --profile tools run --rm migrate
-
-# 3. aplicação
+# 2. aplicação
 APP__JWT__SECRET="$(openssl rand -base64 48)" \
-  docker compose --profile app up -d
+  docker compose --project-directory . -f docker/compose.deploy.yml \
+  --profile app up -d --build api worker
+```
+
+Ou pelos atalhos:
+
+```bash
+just prod-migrate
+APP__JWT__SECRET="$(openssl rand -base64 48)" just prod-up
 ```
 
 Verificação:
@@ -109,7 +133,7 @@ ou na rede de monitoramento.
 
 - São explícitas: nunca rodam no boot da API.
 - Aplicar antes de subir a versão nova:
-  `docker compose --profile tools run --rm migrate`.
+  `just prod-migrate` (ou `docker compose --project-directory . -f docker/compose.deploy.yml --profile tools run --rm --build migrate`).
 - São **forward-only**. Rollback de imagem só funciona se a migration for
   compatível (coluna nullable/default ou expand/contract).
 - Mudou o schema? Gere a entidade com `just entities` e teste em banco limpo.
@@ -150,7 +174,8 @@ Verificações:
 2. Suba `api` e `worker` de novo.
 3. Se a migration não for compatível, restaure o backup do banco.
 
-Nunca use `docker compose down -v` em produção: o `-v` apaga o volume `pgdata`.
+Não rode `docker compose ... down -v` em produção: o `-v` apaga o volume
+`pgdata`. Use `just prod-down`, que não usa `-v`.
 
 ## Runbook
 

@@ -211,11 +211,14 @@ um replay devolveria refresh já rotacionado, o que revogaria a família. A regr
 
 ## Deploy
 
-- `Dockerfile` multi-stage: build em `rust:1.99.1-slim`, runtime
+- `docker/Dockerfile` multi-stage: build em `rust:1.99.1-slim`, runtime
   `debian:bookworm-slim`, UID 10001.
 - `api` e `worker` usam a mesma imagem com comandos diferentes; `migrate` fica
-  no perfil `tools` do compose.
-- Migrations não rodam no boot: `docker compose --profile tools run --rm migrate`.
+  no perfil `tools` do compose de deploy.
+- Compose separado por uso: `docker/compose.local.yml` (infra local),
+  `docker/compose.deploy.yml` (stack de deploy) e `docker/compose.test.yml`
+  (debug manual). Os testes normais usam testcontainers.
+- Migrations não rodam no boot: `just prod-migrate`.
 - CI: `quality` (fmt, clippy, nextest, `cargo deny`) roda em PR e push. O
   `production.yml` (build + compose) é manual e vira gate por tag quando houver
   produção. O `smoke.yml` testa a URL publicada depois do deploy.
