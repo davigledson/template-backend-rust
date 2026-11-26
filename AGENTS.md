@@ -172,9 +172,9 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 - Auditoria: toda ação privilegiada (criar, editar, mudar papel, desativar,
   redefinir senha, confirmar e-mail pelo CLI) grava em `audit_log` **na mesma
   transação**, via `audit::service::record_user`. `changes` leva só o diff,
-  nunca senha, hash ou token. `GET /audit` exige `audit:read`, é somente leitura
-  e não confere `token_version`. O worker expurga o que passar de
-  `audit.retention_days` (`0` mantém tudo).
+  nunca senha, hash ou token. `GET /audit` exige `audit:read` e confere a
+  sessão no banco (ativo, `token_version` e papel); é somente leitura. O worker
+  expurga o que passar de `audit.retention_days` (`0` mantém tudo).
 
 ## E-mail e jobs
 

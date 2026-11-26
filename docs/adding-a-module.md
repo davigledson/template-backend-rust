@@ -359,7 +359,8 @@ existe, adicione ao catálogo em `core/auth/permission.rs` **e** ao mapa do pape
 
 Rotas que precisam conferir `active`, `token_version` e papel no banco chamam
 `users::service::require_session(&state.db, &auth).await?` (é o que o módulo
-`users` faz).
+`users` faz). A leitura de `/audit` também chama, no controller, antes da
+consulta.
 
 ## 7. Registrar o módulo
 

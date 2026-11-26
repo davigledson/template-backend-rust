@@ -601,3 +601,22 @@ entre execuções; `just test-down` derruba.
 
 **Revisitar se**: o nextest estabilizar setup scripts (remover o aviso de
 experimental) ou a suíte passar dos 63 DBs lógicos do Redis.
+
+---
+
+## 2026-11-26 — Leitura da auditoria confere a sessão
+
+**Contexto**: `GET /audit` autorizava só pelo JWT. Um admin rebaixado ou
+desativado continuava lendo o histórico até o access token expirar, porque a
+rota não conferia `token_version` nem `active` no banco.
+
+**Decisão**: o controller de auditoria chama `users::service::require_session`
+antes de listar. A escrita continua nos módulos que mudam o dado, na mesma
+transação; a checagem fica só na leitura. `users` já chama `audit` para gravar,
+então a dependência na direção contrária fica restrita ao controller.
+
+**Consequência**: token revogado, rebaixado ou desativado recebe `401` mesmo que
+as claims ainda digam `admin`. Custa uma query a mais por leitura de auditoria.
+
+**Revisitar se**: a auditoria ganhar outras rotas ou a validação de sessão virar
+um extractor compartilhado para todas as rotas autenticadas.

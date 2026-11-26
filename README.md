@@ -316,7 +316,8 @@ auth.require(USERS_WRITE)?;
 ```
 
 Rotas sensíveis conferem a sessão no banco (`require_session`): usuário ativo,
-`token_version` atual e papel válido.
+`token_version` atual e papel válido. Isso vale para `/auth/me`, gestão de
+usuários e `/audit`.
 
 ## Gestão de usuários (admin)
 

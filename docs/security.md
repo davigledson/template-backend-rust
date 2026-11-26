@@ -59,8 +59,8 @@ Confere no banco:
 
 Qualquer divergência → `401` com "sessão expirada; faça login novamente".
 
-Use em: `/auth/me`, gestão de usuários, troca de senha e qualquer operação
-destrutiva. Não use em toda rota: é uma query a mais.
+Use em: `/auth/me`, gestão de usuários, troca de senha, leitura de `/audit` e
+qualquer operação destrutiva. Não use em toda rota: é uma query a mais.
 
 ## Refresh token
 
