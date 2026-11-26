@@ -9,13 +9,16 @@ use crate::{
     routes::openapi as docs,
 };
 
-pub fn router() -> Router<AppState> {
+pub fn router(docs_enabled: bool) -> Router<AppState> {
     let (api, spec) = docs::build();
 
-    Router::new()
-        .merge(health::router())
-        .merge(api)
-        .merge(docs::router(spec))
+    let mut router = Router::new().merge(health::router()).merge(api);
+
+    if docs_enabled {
+        router = router.merge(docs::router(spec));
+    }
+
+    router
         .fallback(not_found)
         .method_not_allowed_fallback(method_not_allowed)
 }

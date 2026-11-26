@@ -9,6 +9,14 @@ ansi = false
 [cors]
 allowed_origins = []
 
+# Produção não expõe o contrato nem a UI por padrão.
+[docs]
+enabled = false
+
+[security]
+# Só faz efeito quando a API é servida por HTTPS.
+hsts_max_age_secs = 31536000
+
 [server]
 body_limit_mb = 1
 # Dois vCPU no host; deixa folga para o Postgres e o worker.

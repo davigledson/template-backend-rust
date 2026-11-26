@@ -12,7 +12,7 @@ cliente HTTP ──► api (Axum) ──► modules/<feature> ──► core (in
                                     └──► Redis (refresh tokens, rate limit)
 
 cron ─────────► worker (mesmo código, sem HTTP) ──► email_outbox ──► SMTP
-monitor ──────► /metrics (Prometheus, sem auth; restrinja no proxy)
+monitor ──────► /metrics (Prometheus; token opcional, restrinja na rede)
 ```
 
 - **Um binário de API** expõe tudo em `/api/v1`.
@@ -84,7 +84,7 @@ subir a aplicação inteira.
 
 ```text
 TCP
- └─ camadas (core/http.rs): request-id → trace → cors → compress → timeout → body limit
+ └─ camadas (core/http.rs): segurança/no-store → request-id → trace → cors → compress → timeout → body limit
      └─ IP do cliente (core/client_ip.rs) → métricas → idempotência
          └─ router /api/v1
              └─ extractor (AuthUser, ClientIp, Json, Path, Query, Valid)
@@ -104,7 +104,7 @@ TCP
 A documentação não é um artefato paralelo: cada handler declara
 `#[utoipa::path]` e é registrado por `routes!`, então o mesmo router atende e
 gera o OpenAPI. `routes/openapi.rs` serve o JSON em `/api-docs/openapi.json` e o
-Scalar em `/docs`.
+Scalar em `/docs` quando `docs.enabled = true`; produção desliga por padrão.
 
 ## Configuração
 
@@ -205,7 +205,8 @@ um replay devolveria refresh já rotacionado, o que revogaria a família. A regr
 - Spans de `login`, `refresh`, `logout`, criação/atualização de usuário e
   processamento do outbox herdam o `x-request-id` do HTTP.
 - `worker` loga resumo e duração de cada job.
-- O endpoint de métricas não tem autenticação; restrinja na rede/proxy.
+- O endpoint de métricas aceita Bearer opcional (`metrics.token`); sem token,
+  restrinja na rede/proxy. `metrics.enabled = false` remove a rota.
 
 ## Deploy
 

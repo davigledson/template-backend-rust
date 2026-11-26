@@ -134,6 +134,10 @@ Rate limit e proxy:
 | `rate_limit.verification_account_attempts` | 3 | reenvios de confirmação por conta |
 | `rate_limit.verification_ip_attempts` | 10 | reenvios de confirmação por IP |
 | `security.require_email_verified` | `false` | exige e-mail confirmado para entrar |
+| `security.hsts_max_age_secs` | 0 | HSTS em segundos; produção usa 31536000 |
+| `docs.enabled` | `true` | expõe `/docs` e `/api-docs`; produção desliga |
+| `metrics.enabled` | `true` | monta a rota `/metrics` |
+| `metrics.token` | vazio | Bearer opcional do `/metrics` (mín. 16 caracteres) |
 | `server.trust_proxy_headers` | `false` | lê `X-Forwarded-For`/`X-Real-IP` |
 
 O rate limit é **fail-open**: se o Redis cair, o login continua e o evento vai
@@ -146,12 +150,16 @@ para o log. Só habilite `trust_proxy_headers` atrás de um proxy que sobrescrev
 |---|---|
 | `GET /health` | liveness: o processo está de pé (não toca no banco) |
 | `GET /health/ready` | readiness: exige Postgres e Redis; devolve `503` se algum cair |
-| `GET /docs` | UI Scalar com todos os endpoints |
-| `GET /api-docs/openapi.json` | especificação OpenAPI 3 |
+| `GET /docs` | UI Scalar com todos os endpoints, quando `docs.enabled = true` |
+| `GET /api-docs/openapi.json` | especificação OpenAPI 3, quando `docs.enabled = true` |
 | `GET /metrics` | Prometheus: `axum_http_requests_*` + domínio `app_*` (ver `docs/operations.md`) |
 
 Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
-`/metrics` não tem autenticação: restrinja no proxy ou na rede.
+As respostas de `/api/v1` e `/metrics` levam `Cache-Control: no-store` e os
+cabeçalhos de segurança (`nosniff`, `DENY`, `no-referrer`, `Permissions-Policy`).
+HSTS só é enviado com `security.hsts_max_age_secs > 0`. Se `metrics.token`
+estiver definido, `/metrics` exige `Authorization: Bearer <token>`; sem token,
+restrinja a rota na rede/proxy.
 
 ## Autenticação e permissões
 
@@ -301,7 +309,10 @@ docker compose --profile tools run --rm migrate
 - `migrate` fica no perfil `tools` e não roda no boot.
 - `APP__SERVER__TRUST_PROXY_HEADERS` fica `false` por padrão; habilite só atrás
   de um proxy que sobrescreve `X-Forwarded-For`.
-- `GET /metrics` deve ficar restrito à rede de monitoramento.
+- `GET /metrics` deve ficar restrito à rede de monitoramento; defina
+  `APP__METRICS__TOKEN` para exigir Bearer.
+- O perfil `production` desliga `/docs` e `/api-docs`; use
+  `APP__DOCS__ENABLED=true` apenas se a documentação estiver protegida.
 
 ## Estrutura
 
@@ -344,7 +355,8 @@ tests/                      # integração com testcontainers
 ├── common/mod.rs           # containers, login e mailers de teste
 ├── api_flow.rs             # auth, perfil, usuários, rate limit, idempotência
 ├── email_flow.rs           # outbox, dedupe, retry e limpeza do corpo
-└── email_verification.rs   # reenvio público, troca de e-mail e flag de login
+├── email_verification.rs   # reenvio público, troca de e-mail e flag de login
+└── hardening.rs            # cabeçalhos, no-store, docs e métricas
 .github/workflows/ci.yml    # fmt, clippy, nextest, deny e docker build
 Dockerfile                  # imagem multi-stage, non-root
 

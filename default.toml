@@ -60,6 +60,17 @@ ansi = false
 [security]
 # Exige e-mail confirmado para entrar. Precisa de e-mail transacional ativo.
 require_email_verified = false
+# HSTS em segundos; 0 desliga. Só faz efeito quando a API é servida por HTTPS.
+hsts_max_age_secs = 0
+
+[docs]
+# Expõe /docs e /api-docs/openapi.json. Desligue em produção pública.
+enabled = true
+
+[metrics]
+# Expõe /metrics. Token vazio deixa o endpoint público; restrinja na rede/proxy.
+enabled = true
+token = ""
 
 [cors]
 # Em desenvolvimento o perfil adiciona origens locais.

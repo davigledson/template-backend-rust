@@ -473,6 +473,27 @@ antes de ligar a flag. Códigos antigos no Redis expiram sozinhos em 7 dias.
 
 ---
 
+## 2026-11-26 — Cabeçalhos, cache, docs e métricas configuráveis
+
+**Contexto**: a API não enviava cabeçalhos de segurança, podia ter resposta
+autenticada cacheada, expunha `/docs` e `/metrics` em qualquer ambiente e não
+tinha como desligar a documentação.
+
+**Decisão**: middleware único adiciona `nosniff`, `DENY`, `no-referrer`,
+`Permissions-Policy` e HSTS opcional; `/api/v1` e `/metrics` levam
+`Cache-Control: no-store`. `docs.enabled` controla `/docs` e
+`/api-docs/openapi.json` (produção desliga). `metrics.enabled` controla a rota e
+`metrics.token` adiciona Bearer opcional com comparação em tempo constante.
+
+**Consequência**: o proxy ainda pode reforçar HSTS/CSP e esconder rotas. Sem
+token, `/metrics` continua público por decisão explícita; a rede precisa
+restringir. A UI de documentação deixa de existir por padrão em produção.
+
+**Revisitar se**: for necessário expor métricas em porta separada (aí o listener
+dedicado substitui o token) ou servir a documentação publicamente.
+
+---
+
 ## 2026-11-25 — Sessões por dispositivo no Redis, não no banco
 
 **Contexto**: o refresh já é uma família por login. O usuário não tinha como ver

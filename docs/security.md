@@ -206,7 +206,18 @@ Já configurado em `core/http.rs` e `config`:
 - CORS por ambiente;
 - `x-request-id` propagado/gerado;
 - compressão;
-- trace com `tracing`.
+- trace com `tracing`;
+- `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer` e `Permissions-Policy` em todas as respostas;
+- `Strict-Transport-Security` quando `security.hsts_max_age_secs > 0` (só faz
+  efeito em HTTPS);
+- `Cache-Control: no-store` em `/api/v1` e `/metrics`, para token, perfil e
+  métricas não ficarem em cache.
+
+A documentação (`/docs` e `/api-docs/openapi.json`) é controlada por
+`docs.enabled`; o perfil de produção desliga. O `/metrics` aceita um Bearer
+opcional em `metrics.token` (mínimo 16 caracteres); sem token, restrinja a rota
+na rede/proxy.
 
 Erros saem em `application/problem+json` e 5xx nunca vaza `DbErr`/mensagem
 interna.
@@ -276,7 +287,7 @@ interna.
 
 ## Hardening pendente
 
-- [ ] Cabeçalhos de segurança (HSTS, `X-Content-Type-Options`) no proxy.
+- [x] Cabeçalhos de segurança e `no-store` na aplicação.
 - [ ] Rotação de segredo JWT com `kid` (só quando houver necessidade real).
 - [x] Auditoria de ações administrativas (quem mudou o quê e quando).
 - [x] Recuperação de senha por e-mail (código opaco de uso único).

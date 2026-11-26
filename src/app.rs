@@ -1,6 +1,6 @@
 //! Montagem da aplicação: estado + rotas + camadas HTTP.
 
-use axum::{Router, http::header::CONTENT_TYPE, middleware, routing::get};
+use axum::{Router, http::HeaderMap, middleware, routing::get};
 
 use crate::{
     core::{client_ip, http::apply_layers, idempotency, metrics, state::AppState},
@@ -12,7 +12,7 @@ pub fn build(state: AppState) -> Router {
     let idempotency_state = state.clone();
     let (metrics_layer, metrics_handle) = metrics::pair();
 
-    let router = routes::router()
+    let mut router = routes::router(config.docs.enabled)
         .with_state(state)
         .layer(middleware::from_fn_with_state(
             idempotency_state,
@@ -22,19 +22,19 @@ pub fn build(state: AppState) -> Router {
             config.clone(),
             client_ip::resolve,
         ))
-        .layer(metrics_layer)
-        .route(
+        .layer(metrics_layer);
+
+    if config.metrics.enabled {
+        let token = config.metrics.token().map(str::to_owned);
+        router = router.route(
             "/metrics",
-            get(move || {
+            get(move |headers: HeaderMap| {
                 let handle = metrics_handle.clone();
-                async move {
-                    (
-                        [(CONTENT_TYPE, "text/plain; version=0.0.4")],
-                        handle.render(),
-                    )
-                }
+                let token = token.clone();
+                async move { metrics::render(handle, token.as_deref(), &headers) }
             }),
         );
+    }
 
-    apply_layers(router, &config)
+    apply_layers(router, config)
 }

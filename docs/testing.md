@@ -73,7 +73,9 @@ próprio Postgres 18 e Redis 8:
   reprocessamento e corpo apagado após o envio;
 - `tests/email_verification.rs`: reenvio público sem sessão, rate limit por
   conta, troca de e-mail invalidando o código anterior, confirmação manual,
-  auditoria e login com `require_email_verified = true`.
+  auditoria e login com `require_email_verified = true`;
+- `tests/hardening.rs`: cabeçalhos de segurança, `no-store`, HSTS, `/metrics`
+  com e sem token e documentação desligada.
 
 O bloco de outbox prova as garantias:
 

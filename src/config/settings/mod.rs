@@ -12,10 +12,12 @@
 
 mod cors;
 mod database;
+mod docs;
 mod jobs;
 mod jwt;
 mod log;
 mod mail;
+mod metrics;
 mod rate_limit;
 mod redis;
 mod security;
@@ -32,10 +34,12 @@ use thiserror::Error;
 
 pub use cors::CorsSettings;
 pub use database::DatabaseSettings;
+pub use docs::DocsSettings;
 pub use jobs::JobSettings;
 pub use jwt::JwtSettings;
 pub use log::LogSettings;
 pub use mail::MailSettings;
+pub use metrics::MetricsSettings;
 pub use rate_limit::RateLimitSettings;
 pub use redis::RedisSettings;
 pub use security::SecuritySettings;
@@ -73,6 +77,8 @@ pub struct Settings {
     pub log: LogSettings,
     pub cors: CorsSettings,
     pub security: SecuritySettings,
+    pub docs: DocsSettings,
+    pub metrics: MetricsSettings,
 }
 
 impl Settings {
@@ -124,6 +130,7 @@ impl Settings {
         self.mail.collect_errors(&mut problems);
         self.jobs.collect_errors(&mut problems);
         self.log.collect_errors(&mut problems);
+        self.metrics.collect_errors(&mut problems);
 
         // Sem SMTP o código de confirmação só existe no outbox: ligar a
         // exigência de e-mail confirmado tornaria o login impossível.
@@ -153,6 +160,8 @@ impl Default for Settings {
             log: LogSettings::default(),
             cors: CorsSettings::default(),
             security: SecuritySettings::default(),
+            docs: DocsSettings::default(),
+            metrics: MetricsSettings::default(),
         }
     }
 }

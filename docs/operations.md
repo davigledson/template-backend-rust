@@ -8,7 +8,7 @@ incidentes comuns. Para o tamanho do host e quando crescer, ver
 
 | Binário | Papel | Observação |
 |---|---|---|
-| `api` | HTTP em `/api/v1`, `/docs` e `/metrics` | sem cron; pode ter mais de uma instância |
+| `api` | HTTP em `/api/v1`, `/docs` (se ligado) e `/metrics` (se ligado) | sem cron; pode ter mais de uma instância |
 | `worker` | cron do outbox (15 s) e limpeza diária | **uma instância só** evita disputa de lease |
 | `migrator` | aplica migrations e sai | nunca roda no boot da API |
 | `admin` | bootstrap e manutenção | não é serviço |
@@ -34,8 +34,12 @@ Verificação em três passos:
 ```bash
 curl -fsS http://127.0.0.1:8080/health          # processo vivo
 curl -fsS http://127.0.0.1:8080/health/ready    # banco e redis respondem
-curl -fsS http://127.0.0.1:8080/metrics | head  # métricas expostas
+curl -fsS http://127.0.0.1:8080/metrics | head  # métricas expostas (sem token)
 ```
+
+Se `APP__METRICS__TOKEN` estiver definido, use
+`-H "authorization: Bearer <token>"`. O perfil de produção desliga `/docs` por
+padrão; ligue `APP__DOCS__ENABLED=true` apenas atrás de proteção.
 
 **Rollback**: volte a tag da imagem e suba de novo. Migration é
 *forward-only*: se a versão nova exigiu coluna, o binário antigo só volta se
@@ -141,8 +145,10 @@ sem registrar o motivo.
 
 ## Métricas
 
-`/metrics` é Prometheus, sem autenticação. **Restrinja no proxy**; não exponha
-na internet.
+`/metrics` é Prometheus. Com `metrics.token` vazio fica sem autenticação:
+**restrinja no proxy** e não exponha na internet. Com token definido (mínimo 16
+caracteres), exige `Authorization: Bearer <token>`; a comparação é em tempo
+constante. Para desligar a rota, use `metrics.enabled = false`.
 
 | Métrica | Tipo | Lê assim |
 |---|---|---|

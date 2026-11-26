@@ -202,6 +202,10 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 
 - Argon2id, mínimo de 12 caracteres; nunca logar senha, token ou PII.
 - Limite de body, timeouts, CORS por ambiente e `x-request-id` já estão nas camadas.
+- Respostas de `/api/v1` e `/metrics` levam `Cache-Control: no-store` e os
+  cabeçalhos de segurança; HSTS só com `security.hsts_max_age_secs > 0`.
+- `/docs` e `/api-docs` são desligados por `docs.enabled` (produção desliga);
+  `/metrics` aceita `metrics.token` e deve ficar fora da internet.
 - Rate limit de login, recuperação de senha e reenvio de confirmação; detecção
   de reuso de refresh. Ver decisões em `docs/decisions.md`.
 - `X-Forwarded-For` só é confiável com `server.trust_proxy_headers = true`.
@@ -215,16 +219,18 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 - Sem I/O bloqueante dentro de `async`; sem transação ao redor de HTTP.
 - Job de cron não pode segurar o tick; se passar de ~30 s, vira fila.
 - Rate limit é fail-open por decisão: indisponibilidade de Redis não bloqueia login.
-- `/metrics` não tem auth; restrinja no proxy.
+- `/metrics` sem token continua público; defina `APP__METRICS__TOKEN` ou
+  restrinja no proxy.
 - Meça antes de otimizar.
 
 ## Testes
 
 - Toda regra de service tem teste unitário.
 - Todo endpoint novo tem teste de integração (testcontainers) em
-  `tests/api_flow.rs`; o outbox fica em `tests/email_flow.rs` e a confirmação
-  de e-mail em `tests/email_verification.rs`. Os helpers (containers, login,
-  mailers, código no outbox) estão em `tests/common/mod.rs`.
+  `tests/api_flow.rs`; o outbox fica em `tests/email_flow.rs`, a confirmação
+  de e-mail em `tests/email_verification.rs` e o hardening HTTP em
+  `tests/hardening.rs`. Os helpers (containers, login, mailers, código no
+  outbox) estão em `tests/common/mod.rs`.
 - Cada binário de teste sobe seu Postgres/Redis: nada de estado compartilhado
   entre fluxos.
 - Autorização e idempotência têm teste próprio.

@@ -11,6 +11,13 @@
 
 use std::sync::OnceLock;
 
+use axum::{
+    http::{
+        HeaderMap, StatusCode,
+        header::{AUTHORIZATION, CONTENT_TYPE, WWW_AUTHENTICATE},
+    },
+    response::{IntoResponse, Response},
+};
 use axum_prometheus::{
     PrometheusMetricLayer, PrometheusMetricLayerBuilder, metrics,
     metrics::{counter, gauge},
@@ -49,6 +56,52 @@ pub fn pair() -> (PrometheusMetricLayer<'static>, PrometheusHandle) {
 
     let layer = PrometheusMetricLayerBuilder::new().build();
     (layer, handle)
+}
+
+/// Responde `/metrics`, exigindo Bearer quando um token foi configurado.
+pub fn render(handle: PrometheusHandle, expected: Option<&str>, headers: &HeaderMap) -> Response {
+    if let Some(expected) = expected
+        && !authorized(headers, expected)
+    {
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(WWW_AUTHENTICATE, "Bearer")],
+            "token de métricas inválido",
+        )
+            .into_response();
+    }
+
+    (
+        [(CONTENT_TYPE, "text/plain; version=0.0.4")],
+        handle.render(),
+    )
+        .into_response()
+}
+
+fn authorized(headers: &HeaderMap, expected: &str) -> bool {
+    let Some(token) = headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+    else {
+        return false;
+    };
+
+    constant_time_eq(token.as_bytes(), expected.as_bytes())
+}
+
+/// Compara sem sair no primeiro byte diferente.
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+
+    let mut difference = 0u8;
+    for (left, right) in left.iter().zip(right) {
+        difference |= left ^ right;
+    }
+
+    difference == 0
 }
 
 /// Login recusado antes de conferir a senha. `scope` é `account` ou `ip`.
@@ -106,4 +159,31 @@ pub fn set_outbox_depth(pending: u64, failed: u64, sent_24h: u64) {
     gauge!(OUTBOX_PENDING).set(pending as f64);
     gauge!(OUTBOX_FAILED).set(failed as f64);
     gauge!(OUTBOX_SENT_24H).set(sent_24h as f64);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn compara_token_em_tempo_constante() {
+        assert!(constant_time_eq(b"segredo", b"segredo"));
+        assert!(!constant_time_eq(b"segredo", b"segreda"));
+        assert!(!constant_time_eq(b"segredo", b"segred"));
+    }
+
+    #[test]
+    fn aceita_apenas_bearer_correto() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer token-de-teste"),
+        );
+        assert!(authorized(&headers, "token-de-teste"));
+
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer outro"));
+        assert!(!authorized(&headers, "token-de-teste"));
+        assert!(!authorized(&HeaderMap::new(), "token-de-teste"));
+    }
 }
