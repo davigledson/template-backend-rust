@@ -424,7 +424,8 @@ tests/                      # integração com testcontainers
 ├── hardening.rs            # cabeçalhos, no-store, docs e métricas
 └── p2.rs                   # retenção, sessões e código anterior
 
-.github/workflows/ci.yml    # quality no PR; docker+compose em main/tag/manual
+.github/workflows/ci.yml    # quality em PR e push (feedback de desenvolvimento)
+.github/workflows/production.yml # build e smoke de runtime, manual (tag em produção)
 .github/workflows/smoke.yml # smoke pós-deploy contra BASE_URL
 scripts/                    # hooks locais
 docs/                       # arquitetura, segurança, testes, operação e decisões

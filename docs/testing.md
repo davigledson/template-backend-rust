@@ -192,11 +192,12 @@ smoke manual e inspeção visual.
 
 O CI é dividido em três momentos:
 
-- **PR:** só o job `quality` (fmt, clippy, nextest e `cargo deny`). É o feedback
-  rápido do desenvolvimento.
-- **`main`, tag `v*` ou manual:** `quality` + `docker` + `compose`. O `docker`
-  builda a imagem de produção e o `compose` sobe Postgres/Redis, aplica
-  migrations, sobe API/worker, checa health/métricas e testa login inválido.
+- **PR e push:** só o job `quality` (fmt, clippy, nextest e `cargo deny`). É o
+  feedback rápido do desenvolvimento; não builda imagem nem sobe compose.
+- **Produção/release:** `production.yml` roda o `docker` (build da imagem) e o
+  `compose` (Postgres/Redis, migrations, API/worker, health/métricas e login
+  inválido). Hoje ele é manual; quando houver produção, descomente o gatilho de
+  tag `v*`.
 - **Pós-deploy:** o workflow `smoke.yml` roda contra uma URL real, com
   `workflow_dispatch` ou `workflow_call` no pipeline de deploy. Ele checa health,
   cabeçalhos, login inválido e `/metrics` quando `METRICS_TOKEN` está definido.

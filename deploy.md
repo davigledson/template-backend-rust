@@ -65,6 +65,20 @@ Perfis:
 O worker deve rodar em **uma instância só** para evitar disputa de lease do
 outbox. A API pode ter mais de uma réplica atrás de um proxy.
 
+## Gate de produção
+
+O workflow `.github/workflows/production.yml` concentra o build da imagem e o
+smoke de compose. Ele **não** roda em PR nem em push de desenvolvimento.
+
+Hoje o disparo é manual:
+
+```bash
+gh workflow run production.yml
+```
+
+Quando o projeto entrar em produção, descomente o gatilho de tag no workflow
+para que cada `v*` passe pelo build e pelo compose antes do release.
+
 ## Passo a passo
 
 ```bash

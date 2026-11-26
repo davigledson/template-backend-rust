@@ -523,16 +523,18 @@ imutável em storage externo.
 loop de desenvolvimento lento. A maior parte do trabalho acontece em localhost.
 
 **Decisão**: `quality` (fmt, clippy, nextest, deny) roda em PR e push. `docker` e
-`compose` rodam em `main`, tag `v*` e `workflow_dispatch`. O `smoke.yml` separado
-testa uma URL publicada, via dispatch ou `workflow_call` do deploy. O loop local
-ganhou `just ci-fast`, `just ci-full` e hooks opcionais.
+`compose` saíram do CI de desenvolvimento e vivem no `production.yml`, disparado
+manualmente; ao entrar em produção, o gatilho de tag `v*` é habilitado. O
+`smoke.yml` separado testa uma URL publicada, via dispatch ou `workflow_call` do
+deploy. O loop local ganhou `just ci-fast`, `just ci-full` e hooks opcionais.
 
-**Consequência**: PR recebe feedback rápido; regressão de imagem/compose é
-detectada antes do release, não a cada commit. O smoke pós-deploy depende de a
-URL e o token de métricas existirem no ambiente.
+**Consequência**: o CI de desenvolvimento fica rápido e não gasta runner com
+Docker. Regressão de imagem/compose é detectada no gate de produção, não a cada
+commit. O smoke pós-deploy depende de a URL e o token de métricas existirem no
+ambiente.
 
-**Revisitar se**: o número de merges na `main` tornar o build/compose caro, aí
-entra filtro por caminho (`paths`) ou execução noturna.
+**Revisitar se**: o projeto entrar em produção (habilitar tag no
+`production.yml`) ou o volume de releases exigir build por caminho (`paths`).
 
 ---
 
