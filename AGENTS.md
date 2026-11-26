@@ -353,6 +353,7 @@ Se não couber em uma pasta, o módulo está grande demais.
 - `docs/adding-a-module.md` — tutorial passo a passo.
 - `docs/security.md` — auth, e-mail, segredos e hardening.
 - `docs/testing.md` — estratégia de testes.
-- `docs/operations.md` — deploy, backup, outbox, métricas e incidentes.
+- `docs/operations.md` — backup, outbox, métricas e incidentes.
+- `deploy.md` — build, compose, migrations e checklist de produção.
 - `docs/capacity.md` — orçamento de 2 vCPU / 2 GB e quando crescer.
 - `docs/decisions.md` — registro de decisões (ADRs curtos).

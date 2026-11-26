@@ -1,8 +1,8 @@
 # Operação
 
-Runbook do que existe hoje: processos, deploy, backup, outbox, métricas e
-incidentes comuns. Para o tamanho do host e quando crescer, ver
-`capacity.md`.
+Runbook do que existe hoje: processos, backup, outbox, métricas e incidentes
+comuns. Para publicar, ver [`../deploy.md`](../deploy.md). Para o tamanho do
+host e quando crescer, ver `capacity.md`.
 
 ## Processos
 
