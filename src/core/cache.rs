@@ -3,7 +3,9 @@
 //! A API deve continuar de pé quando o Redis cair: as operações de cache
 //! registram o erro e seguem sem cache. O ping é usado apenas no readiness.
 
-use deadpool_redis::{Config, Pool, PoolConfig, Runtime};
+use std::time::Duration;
+
+use deadpool_redis::{Config, Pool, PoolConfig, Runtime, Timeouts};
 use thiserror::Error;
 
 use crate::config::settings::RedisSettings;
@@ -28,6 +30,12 @@ impl Cache {
         let mut config = Config::from_url(settings.url.clone());
         config.pool = Some(PoolConfig {
             max_size: settings.pool_size,
+            // Redis é best-effort: falha rápido e deixa o fluxo seguir sem cache.
+            timeouts: Timeouts {
+                wait: Some(Duration::from_millis(500)),
+                create: Some(Duration::from_secs(2)),
+                recycle: Some(Duration::from_secs(2)),
+            },
             ..PoolConfig::default()
         });
 
