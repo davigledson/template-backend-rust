@@ -85,8 +85,8 @@ impl AuditPage {
 #[into_params(parameter_in = Query)]
 pub struct ListAuditQuery {
     #[serde(default = "default_page")]
-    #[validate(range(min = 1))]
-    #[param(minimum = 1, default = 1)]
+    #[validate(range(min = 1, max = 1_000_000))]
+    #[param(minimum = 1, maximum = 1000000, default = 1)]
     pub page: u64,
     #[serde(default = "default_per_page")]
     #[validate(range(min = 1, max = 100))]
@@ -115,7 +115,10 @@ impl ListAuditQuery {
     }
 
     pub fn offset(&self) -> u64 {
-        self.page().saturating_sub(1) * self.per_page()
+        self.page()
+            .saturating_sub(1)
+            .saturating_mul(self.per_page())
+            .min(i64::MAX as u64)
     }
 }
 
@@ -146,5 +149,11 @@ mod tests {
         assert_eq!(q.page(), 3);
         assert_eq!(q.per_page(), 100);
         assert_eq!(q.offset(), 200);
+    }
+
+    #[test]
+    fn offset_maximo_nao_estoura() {
+        let q = query(u64::MAX, 100);
+        assert_eq!(q.offset(), i64::MAX as u64);
     }
 }

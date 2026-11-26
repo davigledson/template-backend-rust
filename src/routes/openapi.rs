@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use axum::{Json, Router, response::Html, routing::get};
+use axum::{Json, Router, body::Bytes, response::Html, routing::get};
 use utoipa::{
     Modify, OpenApi,
     openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
@@ -59,25 +59,25 @@ pub fn build() -> (Router<AppState>, utoipa::openapi::OpenApi) {
 pub fn router(openapi: utoipa::openapi::OpenApi) -> Router<AppState> {
     let spec = Arc::new(openapi);
     let spec_json = Arc::clone(&spec);
-    let ui = Arc::new(
+    let ui = Arc::new(Bytes::from(
         Scalar::new((*spec).clone())
             .title("Template Backend Rust — API")
             .to_html(),
-    );
+    ));
 
     Router::<AppState>::new()
         .route(
             "/api-docs/openapi.json",
             get(move || {
                 let spec = Arc::clone(&spec_json);
-                async move { Json((*spec).clone()) }
+                async move { Json(spec) }
             }),
         )
         .route(
             "/docs",
             get(move || {
                 let ui = Arc::clone(&ui);
-                async move { Html((*ui).clone()) }
+                async move { Html(ui.as_ref().clone()) }
             }),
         )
         // Evita 404 de favicon no console do navegador.

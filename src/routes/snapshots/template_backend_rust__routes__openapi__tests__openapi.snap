@@ -31,6 +31,7 @@ expression: value
               "type": "integer",
               "format": "int64",
               "default": 1,
+              "maximum": 1000000,
               "minimum": 1
             }
           },
@@ -829,6 +830,7 @@ expression: value
               "type": "integer",
               "format": "int64",
               "default": 1,
+              "maximum": 1000000,
               "minimum": 1
             }
           },
@@ -1713,6 +1715,14 @@ expression: value
                 "type": "null"
               }
             ]
+          },
+          "version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Versão recebida em `GET /users/{id}`. Se enviada e já tiver mudado,\ndevolve `409`."
           }
         },
         "additionalProperties": false
