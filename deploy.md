@@ -20,7 +20,7 @@ O `docker/Dockerfile` é multi-stage:
 | `docker/Dockerfile` | imagem de deploy |
 | `docker/compose.local.yml` | Postgres/Redis/Mailpit no desenvolvimento |
 | `docker/compose.deploy.yml` | stack de deploy |
-| `docker/compose.test.yml` | Postgres/Redis efêmeros para debug manual |
+| `docker/compose.test.yml` | Postgres/Redis compartilhados pelos testes |
 
 ```bash
 just docker-build

@@ -70,10 +70,14 @@ docker build -f docker/Dockerfile -t template-backend-rust:local .
 
 ## Testes
 
-`cargo nextest run` **não** usa `compose.test.yml`: cada binário de teste sobe
-seu próprio Postgres/Redis via testcontainers.
+Com `cargo nextest`, o setup script do `.config/nextest.toml` sobe este compose
+**uma vez** por execução e publica as URLs em `TEST_DATABASE_URL` e
+`TEST_REDIS_URL`. Cada teste ganha um banco próprio no Postgres e um DB lógico
+próprio no Redis (`--databases 64`), então roda em paralelo sem estado
+compartilhado. A infra fica de pé entre execuções; `just test-down` derruba.
 
-Use `compose.test.yml` apenas para inspeção manual:
+Sem nextest (ex.: `cargo test`), o harness ignora o compose e usa testcontainers.
+Para inspecionar o banco à mão:
 
 ```bash
 docker compose --project-directory . -f docker/compose.test.yml up -d

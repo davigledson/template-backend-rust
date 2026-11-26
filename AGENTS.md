@@ -35,6 +35,7 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just worker` | worker de cron |
 | `just mail-up` / `just mail-down` | Mailpit local (SMTP 1025, UI 8025) |
 | `just test` | testes com `cargo nextest` |
+| `just test-down` | derruba a infra compartilhada dos testes |
 | `just fmt` / `just lint` / `just check` | qualidade |
 | `just entities` | gera entidades a partir do banco |
 | `just openapi-check` | snapshot do contrato OpenAPI |
@@ -78,7 +79,7 @@ docker/
 ├── Dockerfile         imagem multi-stage, non-root
 ├── compose.local.yml  Postgres + Redis + Mailpit de desenvolvimento
 ├── compose.deploy.yml api + worker + infra de deploy
-└── compose.test.yml   Postgres/Redis efêmeros para debug manual
+└── compose.test.yml   Postgres/Redis compartilhados pelos testes
 ```
 
 Direção das dependências:
@@ -241,14 +242,16 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 ## Testes
 
 - Toda regra de service tem teste unitário.
-- Todo endpoint novo tem teste de integração (testcontainers) em
+- Todo endpoint novo tem teste de integração em
   `tests/api_flow.rs`; o outbox fica em `tests/email_flow.rs`, a confirmação
   de e-mail em `tests/email_verification.rs`, o hardening HTTP em
   `tests/hardening.rs` e a retenção/sessões em `tests/p2.rs`. Os helpers
-  (containers, login, mailers, código no outbox) estão em
+  (harness, login, mailers, código no outbox) estão em
   `tests/common/mod.rs`.
-- Cada binário de teste sobe seu Postgres/Redis: nada de estado compartilhado
-  entre fluxos.
+- O setup script do `.config/nextest.toml` sobe `compose.test.yml` uma vez por
+  execução; cada `Harness` recebe um banco no Postgres e um DB lógico no Redis,
+  então não há estado compartilhado entre fluxos. Sem `cargo nextest`, o harness
+  cai no testcontainers.
 - Autorização e idempotência têm teste próprio.
 - O snapshot do OpenAPI (`routes::openapi`) deve continuar verde; com mudança
   intencional de contrato, rode `INSTA_UPDATE=always cargo test --lib routes::openapi`

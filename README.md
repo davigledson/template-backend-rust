@@ -48,7 +48,7 @@ Para adicionar outro domínio, crie um módulo seguindo
 | Docker + Compose | sim | sobe Postgres, Redis e Mailpit local |
 | `just` | sim | todos os comandos do projeto |
 | `lld` | sim | linker configurado em `.cargo/config.toml` |
-| `cargo-nextest` | recomendada | `just test`, `just ci-fast` |
+| `cargo-nextest` | recomendada | `just test`, `just ci-fast` (≥ 0.9.98 para setup scripts) |
 | `sea-orm-cli` 2.0.4 | só ao mexer no schema | `just entities` |
 | `cargo-deny` | recomendada | `just deny`, CI |
 
@@ -128,6 +128,7 @@ Regras práticas:
 | `just outbox-retry <id>` | devolve um e-mail ao processamento imediato |
 | `just outbox-retry-all [status] [force]` | reprocessa todos de um status |
 | `just test` | testes unitários + integração |
+| `just test-down` | derruba a infra compartilhada dos testes |
 | `just fmt` / `just lint` / `just check` | qualidade |
 | `just openapi-check` | snapshot do contrato OpenAPI |
 | `just deny` | licenças, advisories e fontes das dependências |
@@ -416,10 +417,10 @@ docker/
 ├── Dockerfile              # imagem de deploy: api, worker e migrator
 ├── compose.local.yml       # Postgres + Redis + Mailpit de desenvolvimento
 ├── compose.deploy.yml      # infra + api + worker de deploy
-└── compose.test.yml        # Postgres/Redis efêmeros para debug manual
+└── compose.test.yml        # Postgres/Redis compartilhados pelos testes
 
-tests/                      # integração com testcontainers
-├── common/mod.rs           # containers, login, mailers e helpers
+tests/                      # integração com Postgres/Redis reais
+├── common/mod.rs           # harness, login, mailers e helpers
 ├── admin_invariant.rs      # concorrência do último admin
 ├── api_flow.rs             # auth, perfil, usuários, rate limit, idempotência
 ├── auth_recovery_flow.rs   # reset de senha, confirmação e sessões
@@ -431,7 +432,8 @@ tests/                      # integração com testcontainers
 .github/workflows/ci.yml    # quality em PR e push (feedback de desenvolvimento)
 .github/workflows/production.yml # build e smoke de runtime, manual (tag em produção)
 .github/workflows/smoke.yml # smoke pós-deploy contra BASE_URL
-scripts/                    # hooks locais
+.config/nextest.toml        # retries, timeouts e setup da infra de teste
+scripts/                    # hooks locais e setup da infra de teste
 docs/                       # arquitetura, segurança, testes e operação
 deploy.md                   # build, compose, migrations e checklist de produção
 ```

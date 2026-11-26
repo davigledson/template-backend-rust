@@ -4,7 +4,7 @@
 
 ```text
         ▲  poucos, lentos
-   integração (testcontainers + axum-test)
+   integração (Postgres/Redis reais + axum-test)
   ─────────────────────────────────────────
    unitários de service, DTO, JWT, permissão
         ▼  muitos, rápidos
@@ -19,6 +19,7 @@
 | Comando | Uso |
 |---|---|
 | `just test` | tudo (`cargo nextest run`) |
+| `just test-down` | derruba a infra compartilhada dos testes |
 | `just test-unit` | só a lib |
 | `just test-verbose` | com `println!`/`tracing` visíveis |
 | `cargo test nome_do_teste` | um teste específico |
@@ -28,7 +29,9 @@
 | `just hooks` | instala pre-commit/pre-push neste clone |
 
 `nextest` roda cada teste em processo próprio e faz retry de teste instável
-(`nextest.toml`: 1 retry local, 2 no perfil `ci`, timeout de 60 s).
+(`.config/nextest.toml`: 1 retry local, 2 no perfil `ci`, timeout de 60 s). O
+mesmo arquivo define o setup script que sobe a infra de teste; setup scripts
+exigem nextest ≥ 0.9.98.
 
 O crate tem `#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)]`.
 `clippy.toml` libera `unwrap`/`expect` **em testes** — produção continua proibida.
@@ -66,8 +69,19 @@ permissão.
 
 Dependências já no `Cargo.toml`: `axum-test`, `testcontainers` 0.27 e
 `testcontainers-modules` 0.15 (`postgres`, `redis`). Os helpers ficam em
-`tests/common/mod.rs` (`Harness::spawn`, login, mailers) e cada binário sobe seu
-próprio Postgres 18 e Redis 8:
+`tests/common/mod.rs` (`Harness::spawn`, login, mailers).
+
+Com `cargo nextest`, o setup script (`.config/nextest.toml` →
+`scripts/test-infra.sh`) sobe `docker/compose.test.yml` **uma vez** por execução
+e publica `TEST_DATABASE_URL`/`TEST_REDIS_URL`. O `Harness` cria um banco
+exclusivo no Postgres e um DB lógico exclusivo no Redis para cada teste, então
+os fluxos continuam isolados e rodam em paralelo. A infra fica de pé entre
+execuções; `just test-down` derruba.
+
+Sem essas variáveis (ex.: `cargo test`), o harness cai no testcontainers e sobe
+um par de containers por teste. Esse é o fallback, não o caminho normal.
+
+Os fluxos:
 
 - `tests/api_flow.rs`: criação, listagem, autorização, troca de papel, soft
   delete, reset de senha, perfil, refresh, rate limit, idempotência, OpenAPI e
@@ -100,25 +114,21 @@ resposta.
 Esqueleto de um teste de auth:
 
 ```rust
-use axum_test::TestServer;
-use testcontainers::runners::AsyncRunner;
-use testcontainers_modules::{postgres::Postgres, redis::Redis};
+mod common;
+
+use common::Harness;
 
 #[tokio::test]
 async fn login_e_me() {
-    let pg = Postgres::default().start().await.expect("postgres");
-    let redis = Redis::default().start().await.expect("redis");
+    // Infra, migrations e admin de teste.
+    let app = Harness::spawn().await;
 
-    let pg_port = pg.get_host_port_ipv4(5432).await.expect("porta");
-    // monte a URL com pg_port, rode as migrations via Migrator::up e construa
-    // Settings/AppState de teste; depois:
-    let server = TestServer::new(app::build(state)).expect("server");
-
-    let response = server
+    let response = app
+        .server
         .post("/api/v1/auth/login")
         .json(&serde_json::json!({
-            "email": "admin@teste.local",
-            "password": "uma-senha-bem-longa-123"
+            "email": common::ADMIN_EMAIL,
+            "password": common::ADMIN_PASSWORD
         }))
         .await;
 
@@ -129,8 +139,8 @@ async fn login_e_me() {
 
 Regras para integração:
 
-- **container por binário de teste**, não por teste (subir Postgres custa
-  segundos); use `Harness` para compartilhar dentro do mesmo fluxo;
+- use `Harness`; não suba containers no teste nem compartilhe estado entre
+  fluxos (cada harness já ganha banco e Redis próprios);
 - migrations rodam no setup (`Migrator::up`);
 - cada teste usa dados próprios (e-mail único) e não assume ordem;
 - teste sempre asserta status, `content-type` e o campo relevante;
@@ -210,7 +220,9 @@ just ci-full   # nextest completo + deny
 just hooks     # instala pre-commit/pre-push no clone atual
 ```
 
-Testcontainers usa o Docker do runner para Postgres e Redis. Falha de lint é
+O job `quality` sobe `compose.test.yml` no Docker do runner (setup script do
+nextest); a infra é compartilhada e cada teste tem banco/Redis próprios. Se o
+Docker não estiver disponível, o harness cai no testcontainers. Falha de lint é
 falha de build. Teste instável deve ser corrigido, não marcado como `#[ignore]`
 sem justificativa e prazo.
 

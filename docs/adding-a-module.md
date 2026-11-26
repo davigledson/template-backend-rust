@@ -373,7 +373,7 @@ O `/api/v1` é aplicado uma única vez em `routes/openapi.rs`, que também gera 
 ## 8. Testes
 
 - Regra de service: teste unitário no próprio arquivo (`#[cfg(test)]`).
-- Endpoint: teste de integração com testcontainers em `tests/`.
+- Endpoint: teste de integração com `Harness` em `tests/`.
 - Autorização: um teste provando 401 sem token e 403 sem permissão.
 - `POST` de recurso sem `Idempotency-Key` → `400`; com a chave, repetir devolve a
   mesma resposta (inclusive `Location`) sem duplicar.

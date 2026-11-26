@@ -549,7 +549,8 @@ Docker e sobe só a infraestrutura.
 `compose.deploy.yml` (infra + api + worker + migrate) e `compose.test.yml`
 (Postgres/Redis efêmeros para inspeção manual). Cada compose tem project name
 próprio, para não colidir containers e volumes. Os testes continuam usando
-testcontainers; `compose.test.yml` não é lido pelo `nextest`.
+testcontainers; `compose.test.yml` não é lido pelo `nextest`. *(Superado em
+2026-11-26: o nextest passou a subir `compose.test.yml` via setup script.)*
 
 **Consequência**: `just up`, `just prod-up` e o compose de teste ficam
 independentes. Comandos dentro de `docker/` exigem `--project-directory .` para
@@ -577,3 +578,26 @@ reconhecer o dispositivo, não como prova forense.
 
 **Revisitar se**: surgir exigência de auditoria de login persistente ou de
 "confiar neste dispositivo" (aí o registro vai para o banco).
+
+---
+
+## 2026-11-26 — Infra de teste compartilhada por execução
+
+**Contexto**: cada teste de integração subia Postgres e Redis próprios via
+testcontainers. O nextest roda um processo por teste, então a suíte pagava 14
+pares de containers por execução e sofria com `PortNotExposed` intermitente.
+
+**Decisão**: um setup script do nextest (`.config/nextest.toml`) sobe
+`docker/compose.test.yml` uma vez por execução e publica as URLs em
+`TEST_DATABASE_URL`/`TEST_REDIS_URL`. Cada `Harness` cria um banco no Postgres e
+usa um DB lógico do Redis (`--databases 64`), preservando o isolamento entre
+testes. Sem `cargo nextest`, o harness cai no testcontainers; a busca da porta
+mapeada ganhou retry para reduzir o flake no fallback.
+
+**Consequência**: a suíte de integração deixou de pagar o start dos containers
+por teste e ficou ~35% mais rápida aqui. O caminho normal depende de setup
+scripts, que ainda são experimentais no nextest, e de Docker. A infra fica de pé
+entre execuções; `just test-down` derruba.
+
+**Revisitar se**: o nextest estabilizar setup scripts (remover o aviso de
+experimental) ou a suíte passar dos 63 DBs lógicos do Redis.

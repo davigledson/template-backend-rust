@@ -222,7 +222,8 @@ um replay devolveria refresh já rotacionado, o que revogaria a família. A regr
   no perfil `tools` do compose de deploy.
 - Compose separado por uso: `docker/compose.local.yml` (infra local),
   `docker/compose.deploy.yml` (stack de deploy) e `docker/compose.test.yml`
-  (debug manual). Os testes normais usam testcontainers.
+  (infra compartilhada dos testes). O nextest sobe o de teste pelo setup script;
+  cada teste ganha banco e DB lógico próprios.
 - Migrations não rodam no boot: `just prod-migrate`.
 - CI: `quality` (fmt, clippy, nextest, `cargo deny`) roda em PR e push. O
   `production.yml` (build + compose) é manual e vira gate por tag quando houver
