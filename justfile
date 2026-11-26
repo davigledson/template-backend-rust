@@ -1,10 +1,8 @@
 set shell := ["bash", "-uc"]
-set dotenv-load := true
 
 profile := env("APP_PROFILE", "development")
-db_url := env("APP__DATABASE__URL", "postgres://app:app@localhost:55432/app")
 compose_local := "docker compose --project-directory . -f docker/compose.local.yml"
-compose_deploy := "docker compose --project-directory . -f docker/compose.deploy.yml"
+compose_deploy := "docker compose --project-directory . --env-file ${APP_ENV_FILE:-/dev/null} -f docker/compose.deploy.yml"
 
 # Lista os comandos disponíveis.
 default:
@@ -25,6 +23,7 @@ doctor:
     @echo "cargo     $(cargo --version)"
     @echo "just      $(just --version | cut -d' ' -f2)"
     @echo "compose   $(docker compose version --short)"
+    @command -v lld >/dev/null 2>&1 && echo "lld       ok" || echo "lld       ausente (instale para o linker do .cargo/config.toml)"
     @{{compose_local}} ps
     @test -f .env && echo ".env      ok" || echo ".env      ausente (rode: just setup)"
 
@@ -127,8 +126,9 @@ test-verbose:
 
 # Gera as entidades SeaORM a partir do banco atual.
 entities:
-    PATH="$HOME/.cargo/bin:$PATH" sea-orm-cli generate entity \
-        --database-url "{{db_url}}" \
+    @set -a; [ -f .env ] && . ./.env; set +a; \
+      PATH="$HOME/.cargo/bin:$PATH" sea-orm-cli generate entity \
+        --database-url "${APP__DATABASE__URL:-postgres://app:app@localhost:55432/app}" \
         --output-dir src/database/entity \
         --with-serde both \
         --with-prelude none \
@@ -153,6 +153,10 @@ prod-down:
 # Aplica as migrations na stack de deploy.
 prod-migrate:
     {{compose_deploy}} --profile tools run --rm --build migrate
+
+# Roda o CLI admin na stack de deploy (create, promote, reset-password...).
+prod-admin +args:
+    {{compose_deploy}} --profile tools run --rm admin {{args}}
 
 # Acompanha os logs da stack de deploy.
 prod-logs:
