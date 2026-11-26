@@ -28,6 +28,10 @@ doctor:
     @{{compose_local}} ps
     @test -f .env && echo ".env      ok" || echo ".env      ausente (rode: just setup)"
 
+# Renomeia o projeto do template (crate, imports, compose, tags, OpenAPI e JWT).
+rename *args:
+    ./scripts/rename-project.sh {{args}}
+
 # Sobe Postgres e Redis em background.
 up:
     {{compose_local}} up -d
