@@ -10,6 +10,7 @@
 //! valida as próprias invariantes em `collect_errors`. Este módulo só monta o
 //! agregado.
 
+mod audit;
 mod cors;
 mod database;
 mod docs;
@@ -32,6 +33,7 @@ use figment::{
 use serde::Deserialize;
 use thiserror::Error;
 
+pub use audit::AuditSettings;
 pub use cors::CorsSettings;
 pub use database::DatabaseSettings;
 pub use docs::DocsSettings;
@@ -79,6 +81,7 @@ pub struct Settings {
     pub security: SecuritySettings,
     pub docs: DocsSettings,
     pub metrics: MetricsSettings,
+    pub audit: AuditSettings,
 }
 
 impl Settings {
@@ -162,6 +165,7 @@ impl Default for Settings {
             security: SecuritySettings::default(),
             docs: DocsSettings::default(),
             metrics: MetricsSettings::default(),
+            audit: AuditSettings::default(),
         }
     }
 }

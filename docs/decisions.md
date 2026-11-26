@@ -494,6 +494,29 @@ dedicado substitui o token) ou servir a documentação publicamente.
 
 ---
 
+## 2026-11-26 — Retenção da auditoria, índice por ação e código único
+
+**Contexto**: a auditoria crescia para sempre, o filtro por `action` não tinha
+índice, o `admin reset-password` deixava metadados de sessão no Redis e um
+reenvio de confirmação mantinha vários códigos válidos ao mesmo tempo.
+
+**Decisão**: `[audit] retention_days` (padrão 365, `0` desliga) alimenta o job
+diário do worker; migration adiciona `audit_log_action_created_idx`; o CLI de
+reset limpa as sessões pelo mesmo service da API; e a emissão de confirmação
+guarda um ponteiro `auth:email-verify:latest:<user>` que apaga o código anterior
+e só aceita o mais recente.
+
+**Consequência**: a retenção passa a ser uma decisão explícita de configuração;
+auditoria antiga some por política, não por acidente. Códigos emitidos antes
+desta mudança (sem ponteiro) deixam de valer após o deploy; o usuário pede
+reenvio. O reset por CLI agora depende do Redis estar acessível, mas a falha é
+best-effort: o `token_version` já invalidou os tokens.
+
+**Revisitar se**: compliance exigir retenção maior/legal hold ou auditoria
+imutável em storage externo.
+
+---
+
 ## 2026-11-25 — Sessões por dispositivo no Redis, não no banco
 
 **Contexto**: o refresh já é uma família por login. O usuário não tinha como ver

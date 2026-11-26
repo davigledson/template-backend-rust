@@ -3,7 +3,7 @@
 use uuid::Uuid;
 
 use crate::{
-    core::{auth::extractor::AuthUser, error::AppError, metrics, state::AppState},
+    core::{auth::extractor::AuthUser, cache::Cache, error::AppError, metrics, state::AppState},
     modules::{
         auth::{
             dto::{SessionList, SessionOut},
@@ -50,8 +50,8 @@ pub async fn revoke(state: &AppState, auth: &AuthUser, family_id: Uuid) -> Resul
 ///
 /// Best-effort: o `token_version` já invalidou os tokens, então uma falha aqui
 /// só deixa a lista de dispositivos desatualizada até o TTL.
-pub async fn clear_sessions(state: &AppState, user_id: Uuid) {
-    if let Err(error) = repository::clear_sessions(&state.cache, user_id).await {
+pub async fn clear_sessions(cache: &Cache, user_id: Uuid) {
+    if let Err(error) = repository::clear_sessions(cache, user_id).await {
         tracing::warn!(error = %error, "falha ao limpar as sessões do usuário");
     }
 }

@@ -9,7 +9,7 @@ use crate::{
     config::Settings,
     core::{error::AppError, mail, shutdown},
     database::connection,
-    modules::email::service as email_service,
+    modules::{audit::service as audit_service, email::service as email_service},
 };
 
 const OUTBOX_SCHEDULE: &str = "*/15 * * * * *";
@@ -48,12 +48,13 @@ pub async fn run(settings: Settings) -> Result<(), AppError> {
         .map_err(AppError::internal)?;
 
     let cleanup_db = db.clone();
+    let audit_retention_days = settings.audit.retention_days;
     scheduler
         .add(
             Job::new_async_tz(CLEANUP_SCHEDULE, timezone, move |_id, _lock| {
                 let db = cleanup_db.clone();
                 Box::pin(async move {
-                    purge_sent(&db).await;
+                    cleanup(&db, audit_retention_days).await;
                 })
             })
             .map_err(AppError::internal)?,
@@ -98,6 +99,11 @@ async fn process_outbox(db: &DatabaseConnection, mailer: &dyn mail::Mailer) {
     }
 }
 
+async fn cleanup(db: &DatabaseConnection, audit_retention_days: u64) {
+    purge_sent(db).await;
+    purge_audit(db, audit_retention_days).await;
+}
+
 async fn purge_sent(db: &DatabaseConnection) {
     match email_service::purge_sent(db).await {
         Ok(removed) if removed > 0 => {
@@ -106,6 +112,18 @@ async fn purge_sent(db: &DatabaseConnection) {
         Ok(_) => {}
         Err(error) => {
             tracing::error!(error = %error, "falha ao limpar o outbox");
+        }
+    }
+}
+
+async fn purge_audit(db: &DatabaseConnection, retention_days: u64) {
+    match audit_service::purge(db, retention_days).await {
+        Ok(removed) if removed > 0 => {
+            tracing::info!(removed, retention_days, "auditoria antiga removida");
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(error = %error, "falha ao limpar a auditoria");
         }
     }
 }

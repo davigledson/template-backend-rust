@@ -112,7 +112,7 @@ pub async fn confirm_reset(
     metrics::password_reset_completed();
 
     // As sessões antigas já caíram pelo `token_version`; limpa os metadados.
-    super::devices::clear_sessions(state, user_id).await;
+    super::devices::clear_sessions(&state.cache, user_id).await;
 
     Ok(())
 }

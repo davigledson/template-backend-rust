@@ -138,6 +138,7 @@ Rate limit e proxy:
 | `docs.enabled` | `true` | expõe `/docs` e `/api-docs`; produção desliga |
 | `metrics.enabled` | `true` | monta a rota `/metrics` |
 | `metrics.token` | vazio | Bearer opcional do `/metrics` (mín. 16 caracteres) |
+| `audit.retention_days` | 365 | retenção do `audit_log`; `0` mantém para sempre |
 | `server.trust_proxy_headers` | `false` | lê `X-Forwarded-For`/`X-Real-IP` |
 
 O rate limit é **fail-open**: se o Redis cair, o login continua e o evento vai
@@ -305,7 +306,8 @@ APP__JWT__SECRET="$(openssl rand -base64 48)" \
 docker compose --profile tools run --rm migrate
 ```
 
-- `api` publica `8080`; `worker` roda o outbox de e-mail e a limpeza.
+- `api` publica `8080`; `worker` roda o outbox de e-mail e a limpeza diária
+  (outbox e auditoria).
 - `migrate` fica no perfil `tools` e não roda no boot.
 - `APP__SERVER__TRUST_PROXY_HEADERS` fica `false` por padrão; habilite só atrás
   de um proxy que sobrescreve `X-Forwarded-For`.
@@ -356,7 +358,8 @@ tests/                      # integração com testcontainers
 ├── api_flow.rs             # auth, perfil, usuários, rate limit, idempotência
 ├── email_flow.rs           # outbox, dedupe, retry e limpeza do corpo
 ├── email_verification.rs   # reenvio público, troca de e-mail e flag de login
-└── hardening.rs            # cabeçalhos, no-store, docs e métricas
+├── hardening.rs            # cabeçalhos, no-store, docs e métricas
+└── p2.rs                   # retenção da auditoria, sessões e código anterior
 .github/workflows/ci.yml    # fmt, clippy, nextest, deny e docker build
 Dockerfile                  # imagem multi-stage, non-root
 

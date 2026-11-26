@@ -20,6 +20,7 @@ use template_backend_rust::{
     database::connection,
     modules::{
         audit::service::Actor,
+        auth::service as auth_service,
         email::service as email_service,
         users::service::{self, NewUser},
     },
@@ -114,7 +115,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             create_admin(&db, &cache, &email, &name, force).await?
         }
         Command::Promote { email } => promote(&db, &email).await?,
-        Command::ResetPassword { email } => reset_password(&db, &email).await?,
+        Command::ResetPassword { email } => reset_password(&db, &cache, &email).await?,
         Command::VerifyEmail { email, all } => verify_email(&db, email.as_deref(), all).await?,
         Command::Outbox { action } => outbox(&db, action).await?,
     }
@@ -171,6 +172,7 @@ async fn promote(db: &DatabaseConnection, email: &str) -> Result<(), Box<dyn std
 
 async fn reset_password(
     db: &DatabaseConnection,
+    cache: &Cache,
     email: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let user = service::find_by_email(db, email)
@@ -179,6 +181,8 @@ async fn reset_password(
 
     let password = read_password(true)?;
     service::set_password(db, Actor::system(), user.id, &password).await?;
+    // O `token_version` já invalida os tokens; isto limpa a lista de dispositivos.
+    auth_service::clear_sessions(cache, user.id).await;
     println!("senha redefinida para {}", user.email);
     Ok(())
 }

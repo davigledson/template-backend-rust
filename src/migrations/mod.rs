@@ -3,6 +3,7 @@ pub mod m20261124_000002_create_email_outbox;
 pub mod m20261124_000003_add_users_role_index;
 pub mod m20261124_000004_create_audit_log;
 pub mod m20261124_000005_add_email_verified_at;
+pub mod m20261126_000006_add_audit_action_index;
 
 use sea_orm_migration::{MigrationTrait, prelude::*};
 
@@ -16,6 +17,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261124_000003_add_users_role_index::Migration),
             Box::new(m20261124_000004_create_audit_log::Migration),
             Box::new(m20261124_000005_add_email_verified_at::Migration),
+            Box::new(m20261126_000006_add_audit_action_index::Migration),
         ]
     }
 }

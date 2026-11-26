@@ -52,6 +52,10 @@ verification_ip_attempts = 10
 enabled = true
 timezone = "America/Sao_Paulo"
 
+[audit]
+# Dias de retenção do audit_log; 0 desliga o expurgo.
+retention_days = 365
+
 [log]
 level = "info"
 format = "json"

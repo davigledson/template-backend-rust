@@ -9,7 +9,7 @@ incidentes comuns. Para o tamanho do host e quando crescer, ver
 | Binário | Papel | Observação |
 |---|---|---|
 | `api` | HTTP em `/api/v1`, `/docs` (se ligado) e `/metrics` (se ligado) | sem cron; pode ter mais de uma instância |
-| `worker` | cron do outbox (15 s) e limpeza diária | **uma instância só** evita disputa de lease |
+| `worker` | cron do outbox (15 s) e limpeza diária (outbox + auditoria) | **uma instância só** evita disputa de lease |
 | `migrator` | aplica migrations e sai | nunca roda no boot da API |
 | `admin` | bootstrap e manutenção | não é serviço |
 
@@ -139,9 +139,9 @@ curl -s "http://127.0.0.1:8080/api/v1/audit?actorId=<uuid>&from=2026-11-01T00:00
 curl -s "http://127.0.0.1:8080/api/v1/audit?action=user.role_changed"
 ```
 
-`actorId` ausente no item significa CLI ou job. A tabela não tem expurgo
-automático; defina retenção antes de produção e nunca edite uma linha por SQL
-sem registrar o motivo.
+`actorId` ausente no item significa CLI ou job. O job diário expurga registros
+mais antigos que `audit.retention_days` (padrão 365; `0` mantém tudo). Nunca
+edite ou apague uma linha por SQL fora dessa política sem registrar o motivo.
 
 ## Métricas
 

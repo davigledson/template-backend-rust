@@ -95,6 +95,6 @@ pub(super) async fn change_my_password(
         &body.new_password,
     )
     .await?;
-    auth_service::clear_sessions(&state, auth.id).await;
+    auth_service::clear_sessions(&state.cache, auth.id).await;
     Ok(StatusCode::NO_CONTENT)
 }

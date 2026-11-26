@@ -3,7 +3,7 @@
 //! A gravação acontece na **mesma transação** da mudança de negócio: se a
 //! alteração não commitou, o registro também não existe.
 
-use chrono::Utc;
+use chrono::{DateTime, TimeDelta, Utc};
 use sea_orm::{ConnectionTrait, DatabaseConnection, Set};
 use serde_json::Value;
 use uuid::Uuid;
@@ -150,6 +150,28 @@ pub async fn list(
     Ok(repository::list(db, query.offset(), query.per_page(), &filter).await?)
 }
 
+/// Remove registros mais antigos que a retenção configurada.
+///
+/// `retention_days = 0` desliga o expurgo. O corte é calculado no relógio do
+/// processo do worker; a operação é idempotente.
+pub async fn purge(db: &DatabaseConnection, retention_days: u64) -> Result<u64, AppError> {
+    let Some(cutoff) = retention_cutoff(retention_days) else {
+        return Ok(0);
+    };
+
+    Ok(repository::delete_before(db, cutoff).await?)
+}
+
+fn retention_cutoff(retention_days: u64) -> Option<DateTime<Utc>> {
+    if retention_days == 0 {
+        return None;
+    }
+
+    let days = i64::try_from(retention_days).ok()?;
+    let delta = TimeDelta::try_days(days)?;
+    Utc::now().checked_sub_signed(delta)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +182,13 @@ mod tests {
             assert_eq!(Action::parse(action.as_str()), Some(action));
         }
         assert_eq!(Action::parse("user.apagado"), None);
+    }
+
+    #[test]
+    fn retencao_zero_desliga_e_valores_invalidos_nao_cortam() {
+        assert!(retention_cutoff(0).is_none());
+        assert!(retention_cutoff(365).is_some());
+        assert!(retention_cutoff(u64::MAX).is_none());
     }
 
     #[test]

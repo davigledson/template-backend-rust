@@ -153,9 +153,10 @@ Detalhes de ameaça e decisão estão em [`security.md`](security.md). Em resumo
   e invalida refresh tokens e sessões sensíveis imediatamente.
 - Autorização por **permissão** (`auth.require(USERS_WRITE)`), não por `if role
   == "admin"`. Assim, adicionar um papel novo não exige caçar comparações.
-- **Auditoria** (`modules/audit`) é dona de `audit_log`, append-only. Outros
-  módulos gravam via `audit::service::record_user` na própria transação; a
-  leitura é `GET /audit` com `audit:read`.
+- **Auditoria** (`modules/audit`) é dona de `audit_log`, append-only para a
+  aplicação. Outros módulos gravam via `audit::service::record_user` na própria
+  transação; a leitura é `GET /audit` com `audit:read` e o worker expurga pela
+  retenção configurada.
 - **Perfil próprio** (`PATCH /auth/me`, `PUT /auth/me/password`) usa
   `profile:write`; a troca de senha confere a senha atual e encerra todas as
   sessões via `token_version`.

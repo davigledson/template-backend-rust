@@ -75,7 +75,9 @@ próprio Postgres 18 e Redis 8:
   conta, troca de e-mail invalidando o código anterior, confirmação manual,
   auditoria e login com `require_email_verified = true`;
 - `tests/hardening.rs`: cabeçalhos de segurança, `no-store`, HSTS, `/metrics`
-  com e sem token e documentação desligada.
+  com e sem token e documentação desligada;
+- `tests/p2.rs`: expurgo da auditoria pela retenção, limpeza de metadados de
+  sessão e invalidação do código de confirmação anterior.
 
 O bloco de outbox prova as garantias:
 

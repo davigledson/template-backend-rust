@@ -126,6 +126,7 @@ O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
 - O valor guardado carrega o `token_version` e um fingerprint do e-mail. Troca
   de senha, mudança de papel, desativação ou troca de e-mail invalidam códigos
   pendentes. O código emitido para o endereço antigo não confirma o novo.
+- Só o código mais recente vale: um reenvio apaga o anterior no mesmo passo.
 - Emitido na criação do usuário e quando o e-mail muda (o e-mail antigo deixa de
   ser confiável; `email_verified_at` volta a nulo).
 - `POST /auth/email/verify` é público; repetir um código já consumido devolve
@@ -165,7 +166,8 @@ O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
 - Nunca por rota pública, nunca por seed com senha no repositório.
 - `create` recusa se já existe admin ativo, a menos que `--force`.
 - Senha por prompt sem eco ou `ADMIN_PASSWORD` (só automação).
-- `reset-password` sobe o `token_version` e derruba as sessões do usuário.
+- `reset-password` sobe o `token_version`, derruba os tokens e limpa os
+  metadados de sessão no Redis (mesmo efeito do reset pela API).
 - O CLI usa `load_unvalidated`: ele não deve exigir segredo JWT para redefinir
   senha.
 
@@ -269,11 +271,11 @@ interna.
 
 ## Auditoria
 
-- `audit_log` é append-only (sem update/delete no código) e grava **na mesma
+- `audit_log` é append-only para a aplicação (sem update) e grava **na mesma
   transação** da mudança: se a alteração não commitou, o registro também não.
 - Ações registradas: `user.created`, `user.admin_created` (CLI),
   `user.updated`, `user.role_changed`, `user.status_changed`,
-  `user.password_reset`.
+  `user.password_reset`, `user.email_verified` (CLI/backfill).
 - `changes` guarda só o diff (`{ "role": { "from": "user", "to": "admin" } }`).
   Senha, hash e token nunca entram.
 - `actor_id` nulo indica CLI ou job, não requisição HTTP.
@@ -282,14 +284,17 @@ interna.
   access token expirar (15 min). Aceitável para leitura, nunca para escrita.
 - Não há FK de `actor_id`/`target_id` para `users`: a auditoria é um retrato
   histórico e não deve impedir ou acompanhar a remoção do usuário.
-- Não existe expurgo automático. Defina a política de retenção antes de
-  produção; apagar linha de auditoria é decisão explícita, fora da aplicação.
+- O worker expurga registros mais antigos que `audit.retention_days` (padrão
+  365; `0` mantém para sempre). A política precisa ser compatível com a
+  exigência de compliance do projeto; o expurgo é a única exclusão automática.
+- A consulta por ação usa o índice `audit_log_action_created_idx`.
 
 ## Hardening pendente
 
 - [x] Cabeçalhos de segurança e `no-store` na aplicação.
 - [ ] Rotação de segredo JWT com `kid` (só quando houver necessidade real).
 - [x] Auditoria de ações administrativas (quem mudou o quê e quando).
+- [x] Retenção configurável e índice por ação da auditoria.
 - [x] Recuperação de senha por e-mail (código opaco de uso único).
 - [x] Verificação de e-mail (opcional no login).
 - [x] Guarda de boot: `require_email_verified` exige `mail.provider = smtp`.

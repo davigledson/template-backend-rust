@@ -153,10 +153,11 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
   /auth/sessions` exige `require_session`; a sessão atual só sai pelo logout.
 - Nunca logar código de recuperação/confirmação, refresh token ou senha.
 - Auditoria: toda ação privilegiada (criar, editar, mudar papel, desativar,
-  redefinir senha) grava em `audit_log` **na mesma transação**, via
-  `audit::service::record_user`. `changes` leva só o diff, nunca senha, hash ou
-  token. `GET /audit` exige `audit:read`, é somente leitura e não confere
-  `token_version`.
+  redefinir senha, confirmar e-mail pelo CLI) grava em `audit_log` **na mesma
+  transação**, via `audit::service::record_user`. `changes` leva só o diff,
+  nunca senha, hash ou token. `GET /audit` exige `audit:read`, é somente leitura
+  e não confere `token_version`. O worker expurga o que passar de
+  `audit.retention_days` (`0` mantém tudo).
 
 ## E-mail e jobs
 
@@ -228,9 +229,10 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 - Toda regra de service tem teste unitário.
 - Todo endpoint novo tem teste de integração (testcontainers) em
   `tests/api_flow.rs`; o outbox fica em `tests/email_flow.rs`, a confirmação
-  de e-mail em `tests/email_verification.rs` e o hardening HTTP em
-  `tests/hardening.rs`. Os helpers (containers, login, mailers, código no
-  outbox) estão em `tests/common/mod.rs`.
+  de e-mail em `tests/email_verification.rs`, o hardening HTTP em
+  `tests/hardening.rs` e a retenção/sessões em `tests/p2.rs`. Os helpers
+  (containers, login, mailers, código no outbox) estão em
+  `tests/common/mod.rs`.
 - Cada binário de teste sobe seu Postgres/Redis: nada de estado compartilhado
   entre fluxos.
 - Autorização e idempotência têm teste próprio.

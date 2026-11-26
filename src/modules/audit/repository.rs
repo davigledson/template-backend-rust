@@ -1,6 +1,7 @@
 //! Queries da tabela `audit_log`. Só este módulo escreve nela.
 //!
-//! A tabela é append-only: não existe update nem delete aqui.
+//! A aplicação só faz insert e consulta. O único delete é o expurgo por
+//! retenção, chamado pelo job diário do worker.
 
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DbErr, EntityTrait,
@@ -26,6 +27,18 @@ where
 {
     Entity::insert(entry).exec_without_returning(db).await?;
     Ok(())
+}
+
+/// Remove registros mais antigos que `cutoff` (retenção).
+pub async fn delete_before(
+    db: &DatabaseConnection,
+    cutoff: chrono::DateTime<chrono::Utc>,
+) -> Result<u64, DbErr> {
+    Entity::delete_many()
+        .filter(Column::CreatedAt.lt(cutoff.fixed_offset()))
+        .exec(db)
+        .await
+        .map(|result| result.rows_affected)
 }
 
 pub async fn list(
