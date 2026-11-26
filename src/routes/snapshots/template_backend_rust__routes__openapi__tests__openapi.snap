@@ -161,14 +161,34 @@ expression: value
           "auth"
         ],
         "summary": "Reenvia o código de confirmação",
-        "description": "Requer sessão válida. É limitado por usuário e não faz nada se o e-mail já está confirmado.",
+        "description": "Sempre devolve 204, exista ou não a conta ou o e-mail já esteja confirmado, para não permitir enumeração. O pedido é limitado por conta e por IP.",
         "operationId": "resend",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendVerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "Pedido recebido"
           },
-          "401": {
-            "description": "Não autenticado ou sessão expirada",
+          "400": {
+            "description": "JSON inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validação falhou",
             "content": {
               "application/json": {
                 "schema": {
@@ -187,12 +207,7 @@ expression: value
               }
             }
           }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/auth/email/verify": {
@@ -1536,6 +1551,19 @@ expression: value
         ],
         "properties": {
           "refreshToken": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResendVerificationRequest": {
+        "type": "object",
+        "description": "Pedido público de reenvio do código de confirmação.",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
             "type": "string"
           }
         },

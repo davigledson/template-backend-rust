@@ -1,9 +1,12 @@
-//! Confirmação de e-mail: consumo do código e reenvio.
+//! Confirmação de e-mail: consumo do código e reenvio público.
+//!
+//! O reenvio é público por e-mail, como a recuperação de senha: sempre devolve
+//! `204`, exista ou não a conta, para não permitir enumeração. O único `429` é
+//! o rate limit por conta/IP, que qualquer um pode disparar.
 
 use crate::{
     core::{
         auth::{
-            extractor::AuthUser,
             rate_limit::{LimitDecision, RateLimiter},
             verification_token,
         },
@@ -11,57 +14,104 @@ use crate::{
         metrics,
         state::AppState,
     },
-    modules::{auth::dto::VerifyEmailRequest, users::service as users_service},
+    modules::{
+        auth::dto::{ResendVerificationRequest, VerifyEmailRequest},
+        users::service as users_service,
+    },
 };
 
 /// Consome o código e marca o e-mail como confirmado.
 ///
 /// Repetir com o mesmo código devolve 400: o código é de uso único. Se a conta
 /// já estava confirmada, o resultado é 204 (idempotente do ponto de vista do
-/// usuário).
+/// usuário). O código só vale se o e-mail e o `token_version` não mudaram.
 #[tracing::instrument(skip(state, request))]
 pub async fn verify(state: &AppState, request: VerifyEmailRequest) -> Result<(), AppError> {
-    let Some(user_id) = verification_token::consume(&state.cache, &request.token).await? else {
+    let Some((user_id, token_version, email_fingerprint)) =
+        verification_token::consume(&state.cache, &request.token).await?
+    else {
         return Err(AppError::BadRequest(
             "código inválido ou expirado".to_owned(),
         ));
     };
 
-    if users_service::mark_email_verified(&state.db, user_id).await? {
+    if users_service::mark_email_verified(&state.db, user_id, token_version, &email_fingerprint)
+        .await?
+    {
         metrics::email_verified();
     }
 
     Ok(())
 }
 
-/// Reenvia o código para o e-mail do usuário autenticado.
-#[tracing::instrument(skip(state, auth))]
-pub async fn resend(state: &AppState, auth: &AuthUser) -> Result<(), AppError> {
-    let user = users_service::require_session(&state.db, auth).await?;
-    if user.email_verified_at.is_some() {
+/// Reenvia o código de confirmação para o e-mail informado.
+///
+/// Sempre devolve `204`; contas inexistentes, inativas ou já confirmadas não
+/// recebem nada e o cliente não consegue distinguir os casos.
+#[tracing::instrument(skip(state, request, client_ip))]
+pub async fn resend(
+    state: &AppState,
+    request: ResendVerificationRequest,
+    client_ip: &str,
+) -> Result<(), AppError> {
+    let email = users_service::normalize_email(&request.email);
+    if email.is_empty() {
         return Ok(());
     }
 
     let limiter = RateLimiter::new(&state.cache, state.config.rate_limit.window());
-    let key = RateLimiter::verification_key(user.id);
+    let account_key = RateLimiter::verification_account_key(&email);
+    let ip_key = RateLimiter::verification_ip_key(client_ip);
 
-    match limiter
-        .check(&key, state.config.rate_limit.verification_user_attempts)
-        .await
-    {
-        Ok(LimitDecision::Allowed) => {}
-        Ok(LimitDecision::Blocked { retry_after_secs }) => {
-            return Err(AppError::TooManyRequests { retry_after_secs });
-        }
-        Err(error) => {
-            tracing::warn!(error = %error, "rate limit indisponível; seguindo sem limite");
-        }
-    }
+    enforce_limit(
+        &limiter,
+        &account_key,
+        state.config.rate_limit.verification_account_attempts,
+        "account",
+    )
+    .await?;
+    enforce_limit(
+        &limiter,
+        &ip_key,
+        state.config.rate_limit.verification_ip_attempts,
+        "ip",
+    )
+    .await?;
+    register_attempt(&limiter, &account_key).await;
+    register_attempt(&limiter, &ip_key).await;
 
-    if let Err(error) = limiter.register_failure(&key).await {
-        tracing::warn!(error = %error, "falha ao registrar reenvio de confirmação");
+    let Some(user) = users_service::find_by_email(&state.db, &email).await? else {
+        return Ok(());
+    };
+    if !user.active || user.email_verified_at.is_some() {
+        return Ok(());
     }
 
     users_service::send_email_verification(&state.db, &state.cache, &user).await;
     Ok(())
+}
+
+async fn enforce_limit(
+    limiter: &RateLimiter<'_>,
+    key: &str,
+    max_attempts: u32,
+    scope: &'static str,
+) -> Result<(), AppError> {
+    match limiter.check(key, max_attempts).await {
+        Ok(LimitDecision::Allowed) => Ok(()),
+        Ok(LimitDecision::Blocked { retry_after_secs }) => {
+            tracing::warn!(scope, retry_after_secs, "reenvio de confirmação bloqueado");
+            Err(AppError::TooManyRequests { retry_after_secs })
+        }
+        Err(error) => {
+            tracing::warn!(error = %error, scope, "rate limit indisponível; seguindo sem limite");
+            Ok(())
+        }
+    }
+}
+
+async fn register_attempt(limiter: &RateLimiter<'_>, key: &str) {
+    if let Err(error) = limiter.register_failure(key).await {
+        tracing::warn!(error = %error, "falha ao registrar reenvio de confirmação");
+    }
 }

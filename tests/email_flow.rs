@@ -62,6 +62,15 @@ async fn fluxo_do_outbox_de_email() {
         .expect("enviados");
     assert_eq!(sent, 4);
 
+    // O corpo é apagado depois do envio: ele pode conter códigos de uso único.
+    let sent_item = Outbox::find()
+        .filter(OutboxColumn::Status.eq("sent"))
+        .one(db)
+        .await
+        .expect("buscar enviado")
+        .expect("enviado existe");
+    assert!(sent_item.body.is_empty());
+
     // --- deduplicação pelo dedupe_key ---
     let message = EmailMessage {
         to: "dedupe@teste.local".to_owned(),

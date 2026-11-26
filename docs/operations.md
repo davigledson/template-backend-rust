@@ -77,7 +77,9 @@ rotação com `kid`: a troca é big bang, com todo mundo fazendo login de novo.
 
 Estados: `pending` → `processing` → `sent` ou `pending` (retry) → `failed`
 após 5 tentativas. Backoff: 1, 2, 4, 8, 16 min. `dedupe_key` evita linha
-duplicada. `sent` com mais de 30 dias é apagado pelo job diário.
+duplicada. Ao marcar `sent`, o corpo é apagado; a linha fica só com metadados e
+é removida após 30 dias pelo job diário. `failed` mantém o corpo para permitir
+`retry` manual.
 
 ```bash
 just outbox-list                      # failed, 20 itens
@@ -96,6 +98,29 @@ Conferir a profundidade sem CLI:
 ```sql
 select status, count(*) from email_outbox group by status order by 2 desc;
 ```
+
+## Confirmação de e-mail e rollout
+
+O reenvio é público (`POST /auth/email/resend` com o e-mail no corpo) e sempre
+devolve `204`; o limite é por conta e por IP. O boot **recusa** subir com
+`security.require_email_verified = true` e `mail.provider = log`.
+
+Para ligar a exigência em uma base que já tem usuários:
+
+```bash
+# 1. valide o SMTP real e o worker entregando
+just outbox-list status=failed
+
+# 2. confirme quem já está pendente (ou confirme um por um)
+just admin-verify-email usuario@empresa.com
+just admin-verify-email-all
+
+# 3. só então ligue a flag no ambiente e reinicie a API
+# APP__SECURITY__REQUIRE_EMAIL_VERIFIED=true
+```
+
+Sem o backfill, todo usuário antigo com `email_verified_at` nulo recebe `403`
+no login. O `admin verify-email` grava `user.email_verified` na auditoria.
 
 ## Auditoria
 
@@ -152,7 +177,7 @@ banco: o worker não expõe `/metrics`. Se o worker parar, `pending` sobe e
   `auth:login:fail:ip:<sha256(ip)>`, janela de 15 min configurável.
 - Recuperação de senha: `auth:pwreset:fail:account:*` (3) e
   `auth:pwreset:fail:ip:*` (10). Reenvio de confirmação:
-  `auth:verify:fail:user:<uuid>` (3).
+  `auth:verify:fail:account:*` (3) e `auth:verify:fail:ip:*` (10).
 - Login válido zera a conta, não o IP. Pedido de recuperação conta na hora,
   independentemente de a conta existir.
 - Para liberar um usuário legítimo antes da janela:
@@ -184,7 +209,7 @@ o usuário pelo log do 429.
 | E-mail não chega | worker parado ou SMTP fora | `just outbox-list status=pending`, logs do worker |
 | Recuperação devolve 204 e nada chega | conta inexistente/inativa, worker parado ou SMTP fora | conferir `app_password_reset_requested_total` e o outbox |
 | Reset devolve 400 | código expirado, já usado ou senha mudou depois do pedido | pedir outro código (`forgot`) |
-| Login 403 "confirme seu e-mail" | `security.require_email_verified = true` | confirmar pelo e-mail ou desligar a exigência |
+| Login 403 "confirme seu e-mail" | `security.require_email_verified = true` | `just admin-verify-email <email>` ou desligar a exigência |
 | Outbox `failed` crescendo | provedor rejeitando | ler `last_error`, corrigir e `retry-all` |
 | 409 na criação de usuário | `Idempotency-Key` reutilizada ou e-mail duplicado | conferir o `detail` do Problem |
 | Sessões caíram todas | Redis reiniciado | esperado: refresh é opaco e vive no Redis |

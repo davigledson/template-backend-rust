@@ -451,6 +451,28 @@ endpoint de login recusa antes de emitir token e o front precisa de tela de
 
 ---
 
+## 2026-11-26 — Confirmação amarrada ao endereço e reenvio público
+
+**Contexto**: o código de confirmação guardava só o `user_id`. Trocar o e-mail
+depois da emissão ainda validava o endereço novo, e o reenvio exigia login —
+justamente o que o usuário não consegue fazer quando a exigência de e-mail
+confirmado está ligada.
+
+**Decisão**: o valor no Redis carrega `token_version` e fingerprint do e-mail,
+como o código de recuperação; o consumo confere os dois no banco. O reenvio
+passa a ser público por e-mail, com `204` sempre e rate limit por conta/IP. O
+boot recusa `require_email_verified = true` com `mail.provider = log`. O corpo
+do outbox é apagado ao marcar `sent`.
+
+**Consequência**: trocar e-mail senha/papel invalida códigos pendentes; não há
+enumeração no reenvio; a base existente precisa de `admin verify-email --all`
+antes de ligar a flag. Códigos antigos no Redis expiram sozinhos em 7 dias.
+
+**Revisitar se**: o reenvio público virar alvo de abuso mesmo com o rate limit
+(aí entra captcha ou prova de trabalho).
+
+---
+
 ## 2026-11-25 — Sessões por dispositivo no Redis, não no banco
 
 **Contexto**: o refresh já é uma família por login. O usuário não tinha como ver

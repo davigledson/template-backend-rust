@@ -85,6 +85,8 @@ async fn recuperacao_de_senha_por_email() {
 async fn confirmacao_de_email_libera_o_login_quando_exigida() {
     let app = Harness::spawn_with(|settings: &mut Settings| {
         settings.security.require_email_verified = true;
+        settings.mail.provider = "smtp".to_owned();
+        settings.mail.smtp_url = "smtp://127.0.0.1:1025".to_owned();
     })
     .await;
 
@@ -114,12 +116,12 @@ async fn confirmacao_de_email_libera_o_login_quando_exigida() {
         .await;
     replay.assert_status_bad_request();
 
-    let access = app.login("bia@teste.local", "SenhaDaBia#2026").await;
+    app.login("bia@teste.local", "SenhaDaBia#2026").await;
 
-    // Já confirmado: o reenvio é inofensivo e devolve 204.
+    // Já confirmado: o reenvio público é inofensivo e devolve 204.
     app.server
         .post("/api/v1/auth/email/resend")
-        .add_header("authorization", bearer(&access))
+        .json(&json!({ "email": "bia@teste.local" }))
         .await
         .assert_status_no_content();
 

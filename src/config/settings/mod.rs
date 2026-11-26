@@ -125,6 +125,12 @@ impl Settings {
         self.jobs.collect_errors(&mut problems);
         self.log.collect_errors(&mut problems);
 
+        // Sem SMTP o código de confirmação só existe no outbox: ligar a
+        // exigência de e-mail confirmado tornaria o login impossível.
+        if self.security.require_email_verified && self.mail.provider != "smtp" {
+            problems.push("security.require_email_verified exige mail.provider = smtp".to_owned());
+        }
+
         if problems.is_empty() {
             Ok(())
         } else {
@@ -175,5 +181,19 @@ mod tests {
         let error = settings.validate().unwrap_err().to_string();
         assert!(error.contains("jwt.secret"), "{error}");
         assert!(error.contains("jobs.timezone"), "{error}");
+    }
+
+    #[test]
+    fn confirmacao_obrigatoria_exige_smtp() {
+        let mut settings = valid();
+        settings.security.require_email_verified = true;
+        settings.mail.provider = "log".to_owned();
+
+        let error = settings.validate().unwrap_err().to_string();
+        assert!(error.contains("require_email_verified"), "{error}");
+
+        settings.mail.provider = "smtp".to_owned();
+        settings.mail.smtp_url = "smtp://localhost:1025".to_owned();
+        assert!(settings.validate().is_ok());
     }
 }

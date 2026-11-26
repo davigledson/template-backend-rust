@@ -36,16 +36,18 @@ pub enum Action {
     UserRoleChanged,
     UserStatusChanged,
     UserPasswordReset,
+    UserEmailVerified,
 }
 
 impl Action {
-    pub const ALL: [Action; 6] = [
+    pub const ALL: [Action; 7] = [
         Action::UserCreated,
         Action::UserAdminCreated,
         Action::UserUpdated,
         Action::UserRoleChanged,
         Action::UserStatusChanged,
         Action::UserPasswordReset,
+        Action::UserEmailVerified,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -56,6 +58,7 @@ impl Action {
             Self::UserRoleChanged => "user.role_changed",
             Self::UserStatusChanged => "user.status_changed",
             Self::UserPasswordReset => "user.password_reset",
+            Self::UserEmailVerified => "user.email_verified",
         }
     }
 

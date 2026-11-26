@@ -74,6 +74,14 @@ pub struct VerifyEmailRequest {
     pub token: String,
 }
 
+/// Pedido público de reenvio do código de confirmação.
+#[derive(Debug, Deserialize, Validate, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResendVerificationRequest {
+    #[validate(length(min = 1, max = 254))]
+    pub email: String,
+}
+
 /// Uma sessão ativa (família de refresh), como o usuário a vê.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]

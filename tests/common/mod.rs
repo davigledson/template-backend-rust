@@ -8,7 +8,9 @@
 use std::sync::{Arc, Mutex};
 
 use axum_test::TestServer;
-use sea_orm::{Database, DatabaseConnection};
+use sea_orm::{
+    ColumnTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+};
 use sea_orm_migration::MigratorTrait;
 use serde_json::{Value, json};
 use template_backend_rust::{
@@ -20,6 +22,7 @@ use template_backend_rust::{
         mail::{self, EmailMessage, Mailer, MailerError},
         state::AppState,
     },
+    database::entity::email_outbox::{Column as OutboxColumn, Entity as Outbox},
     migrations::Migrator,
     modules::{
         audit::service::Actor,
@@ -155,6 +158,35 @@ pub async fn session(server: &TestServer, email: &str, password: &str) -> Value 
 
 pub fn bearer(token: &str) -> String {
     format!("Bearer {token}")
+}
+
+/// Quantidade de e-mails de confirmação já enfileirados para o endereço.
+pub async fn verification_email_count(db: &DatabaseConnection, email: &str) -> u64 {
+    Outbox::find()
+        .filter(OutboxColumn::ToEmail.eq(email))
+        .filter(OutboxColumn::Subject.eq("Confirme seu e-mail"))
+        .count(db)
+        .await
+        .expect("contagem de confirmações")
+}
+
+/// Extrai do outbox o código de confirmação mais recente do endereço.
+pub async fn verification_token(db: &DatabaseConnection, email: &str) -> String {
+    let item = Outbox::find()
+        .filter(OutboxColumn::ToEmail.eq(email))
+        .filter(OutboxColumn::Subject.eq("Confirme seu e-mail"))
+        .order_by_desc(OutboxColumn::CreatedAt)
+        .one(db)
+        .await
+        .expect("consulta do outbox")
+        .expect("e-mail de confirmação no outbox");
+
+    item.body
+        .lines()
+        .map(str::trim)
+        .find(|line| line.len() == 64 && line.chars().all(|char| char.is_ascii_hexdigit()))
+        .expect("código de confirmação no corpo")
+        .to_owned()
 }
 
 #[derive(Default)]

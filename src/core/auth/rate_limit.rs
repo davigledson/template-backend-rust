@@ -18,7 +18,8 @@ const LOGIN_ACCOUNT_PREFIX: &str = "auth:login:fail:account:";
 const LOGIN_IP_PREFIX: &str = "auth:login:fail:ip:";
 const RESET_ACCOUNT_PREFIX: &str = "auth:pwreset:fail:account:";
 const RESET_IP_PREFIX: &str = "auth:pwreset:fail:ip:";
-const VERIFY_PREFIX: &str = "auth:verify:fail:user:";
+const VERIFY_ACCOUNT_PREFIX: &str = "auth:verify:fail:account:";
+const VERIFY_IP_PREFIX: &str = "auth:verify:fail:ip:";
 
 /// Incrementa e define o TTL apenas na primeira falha da janela.
 const FAILURE_SCRIPT: &str = r"
@@ -63,9 +64,14 @@ impl<'a> RateLimiter<'a> {
         format!("{RESET_IP_PREFIX}{}", hash_subject(ip))
     }
 
-    /// Chave de reenvios de confirmação de e-mail por usuário.
-    pub fn verification_key(user_id: uuid::Uuid) -> String {
-        format!("{VERIFY_PREFIX}{user_id}")
+    /// Chave de reenvios de confirmação de e-mail por conta.
+    pub fn verification_account_key(normalized_email: &str) -> String {
+        format!("{VERIFY_ACCOUNT_PREFIX}{}", hash_subject(normalized_email))
+    }
+
+    /// Chave de reenvios de confirmação de e-mail por IP.
+    pub fn verification_ip_key(ip: &str) -> String {
+        format!("{VERIFY_IP_PREFIX}{}", hash_subject(ip))
     }
 
     pub async fn check(&self, key: &str, max_attempts: u32) -> Result<LimitDecision, CacheError> {
@@ -152,6 +158,21 @@ mod tests {
         assert!(account.starts_with(RESET_ACCOUNT_PREFIX));
         assert!(ip.starts_with(RESET_IP_PREFIX));
         assert_ne!(account, RateLimiter::account_key("ana@teste.local"));
-        assert!(RateLimiter::verification_key(uuid::Uuid::nil()).starts_with(VERIFY_PREFIX));
+    }
+
+    #[test]
+    fn chaves_de_verificacao_sao_separadas_e_nao_expoem_email() {
+        let account = RateLimiter::verification_account_key("ana@teste.local");
+        let ip = RateLimiter::verification_ip_key("203.0.113.10");
+
+        assert!(account.starts_with(VERIFY_ACCOUNT_PREFIX));
+        assert!(ip.starts_with(VERIFY_IP_PREFIX));
+        assert!(!account.contains("ana"));
+        assert!(!account.contains('@'));
+        assert_eq!(
+            account,
+            RateLimiter::verification_account_key("ana@teste.local")
+        );
+        assert_ne!(account, RateLimiter::reset_account_key("ana@teste.local"));
     }
 }

@@ -123,17 +123,24 @@ O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
 ## Confirmação de e-mail
 
 - Código opaco de 7 dias, hash no Redis, uso único.
+- O valor guardado carrega o `token_version` e um fingerprint do e-mail. Troca
+  de senha, mudança de papel, desativação ou troca de e-mail invalidam códigos
+  pendentes. O código emitido para o endereço antigo não confirma o novo.
 - Emitido na criação do usuário e quando o e-mail muda (o e-mail antigo deixa de
   ser confiável; `email_verified_at` volta a nulo).
 - `POST /auth/email/verify` é público; repetir um código já consumido devolve
   `400`, confirmar conta já confirmada devolve `204`.
-- `POST /auth/email/resend` exige sessão e é limitado a 3 reenvios por usuário
-  na janela; com e-mail já confirmado é no-op (`204`).
+- `POST /auth/email/resend` é público e recebe só o e-mail: devolve **204
+  sempre**, exista ou não a conta ou já esteja confirmada. O limite é de 3
+  pedidos por conta e 10 por IP na janela.
 - `security.require_email_verified = true` faz o login devolver `403` enquanto o
   e-mail não for confirmado. Padrão `false`: o template não depende de SMTP para
-  funcionar.
+  funcionar. O boot recusa a combinação com `mail.provider = log`, porque o
+  código nunca sairia do outbox.
 - O envio é best-effort: a conta é criada mesmo se Redis/SMTP falharem; o
   usuário pode pedir reenvio depois.
+- Para ligar a exigência em uma base existente, rode `admin verify-email --all`
+  antes de mudar a flag.
 
 ## Sessões por dispositivo
 
@@ -178,8 +185,10 @@ O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
 - A senha nunca vai em e-mail, nem em template. O `welcome` não contém a senha.
 - No provider `log`, o destinatário é mascarado (`a***@dominio`); assunto e
   remetente aparecem, corpo não.
-- O corpo do e-mail fica no banco (`email_outbox`) até 30 dias depois do envio;
-  não grave segredo, token ou dado sensível nele.
+- O corpo é apagado no mesmo update que marca o e-mail como `sent`: a linha
+  mantém destinatário, assunto e datas por até 30 dias, mas não o código de uso
+  único. Itens `failed` ainda guardam o corpo para permitir reprocessamento
+  manual; não grave segredo além do necessário.
 - `APP__MAIL__SMTP_URL` contém credenciais e é redigida no `Debug`; só no
   ambiente.
 - O worker entrega at-least-once: não use e-mail como confirmação única de
@@ -223,7 +232,8 @@ interna.
 
 - **Janela fixa** de 15 min, contadores no Redis, chaves com hash do e-mail/IP
   (sem PII no Redis). Login, recuperação (`auth:pwreset:fail:*`) e reenvio de
-  confirmação (`auth:verify:fail:user:*`) usam chaves separadas.
+  confirmação (`auth:verify:fail:account:*` e `auth:verify:fail:ip:*`) usam
+  chaves separadas.
 - Bloqueio devolve `429` e `Retry-After`; login válido zera as falhas da conta,
   não as do IP.
 - **Fail-open**: Redis indisponível não impede login; o evento vai para o log.
@@ -271,6 +281,8 @@ interna.
 - [x] Auditoria de ações administrativas (quem mudou o quê e quando).
 - [x] Recuperação de senha por e-mail (código opaco de uso único).
 - [x] Verificação de e-mail (opcional no login).
+- [x] Guarda de boot: `require_email_verified` exige `mail.provider = smtp`.
 - [x] Sessões por dispositivo com revogação individual.
 - [ ] Notificar login de dispositivo novo por e-mail.
-- [ ] Exigir e-mail confirmado em produção (virar `true` depois de validar o SMTP).
+- [ ] Exigir e-mail confirmado em produção (virar `true` depois de validar o SMTP
+  e rodar `admin verify-email --all` na base existente).

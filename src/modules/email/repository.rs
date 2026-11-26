@@ -81,6 +81,9 @@ pub async fn mark_sent(db: &DatabaseConnection, id: uuid::Uuid) -> Result<u64, D
     Entity::update_many()
         .col_expr(Column::Status, Expr::value("sent"))
         .col_expr(Column::SentAt, Expr::value(now))
+        // O corpo pode conter códigos de recuperação/confirmação: depois do
+        // envio só os metadados são úteis para inspeção e retenção.
+        .col_expr(Column::Body, Expr::value(""))
         .col_expr(
             Column::LockedAt,
             Expr::value(Option::<DateTime<FixedOffset>>::None),

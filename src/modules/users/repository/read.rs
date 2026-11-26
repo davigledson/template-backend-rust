@@ -25,6 +25,15 @@ where
     Entity::find().filter(Column::Email.eq(email)).one(db).await
 }
 
+/// Usuários que ainda não confirmaram o e-mail, do mais antigo para o mais novo.
+pub async fn list_unverified(db: &DatabaseConnection) -> Result<Vec<users::Model>, DbErr> {
+    Entity::find()
+        .filter(Column::EmailVerifiedAt.is_null())
+        .order_by_asc(Column::CreatedAt)
+        .all(db)
+        .await
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn list(
     db: &DatabaseConnection,

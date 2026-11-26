@@ -65,6 +65,8 @@ just dev                      # API em http://localhost:8080
 | `just admin-create <email> "<nome>" [true]` | cria o primeiro admin (ou outro com `true`) |
 | `just admin-promote <email>` | promove usuário existente a admin |
 | `just admin-reset-password <email>` | redefine a senha e invalida as sessões |
+| `just admin-verify-email <email>` | confirma o e-mail de um usuário |
+| `just admin-verify-email-all` | confirma todos os e-mails pendentes (backfill) |
 | `just outbox-list [status] [limit]` | lista e-mails do outbox (padrão: `failed`, 20) |
 | `just outbox-retry <id>` | devolve um e-mail ao processamento imediato |
 | `just outbox-retry-all [status] [force]` | reprocessa todos de um status |
@@ -129,7 +131,8 @@ Rate limit e proxy:
 | `rate_limit.login_window_secs` | 900 | janela fixa de 15 min |
 | `rate_limit.password_reset_account_attempts` | 3 | pedidos de recuperação por conta |
 | `rate_limit.password_reset_ip_attempts` | 10 | pedidos de recuperação por IP |
-| `rate_limit.verification_user_attempts` | 3 | reenvios de confirmação por usuário |
+| `rate_limit.verification_account_attempts` | 3 | reenvios de confirmação por conta |
+| `rate_limit.verification_ip_attempts` | 10 | reenvios de confirmação por IP |
 | `security.require_email_verified` | `false` | exige e-mail confirmado para entrar |
 | `server.trust_proxy_headers` | `false` | lê `X-Forwarded-For`/`X-Real-IP` |
 
@@ -163,7 +166,7 @@ Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
 | `POST /api/v1/auth/password/forgot` | envia código de recuperação; **sempre 204**, sem revelar se o e-mail existe |
 | `POST /api/v1/auth/password/reset` | código + nova senha; encerra as sessões (204) |
 | `POST /api/v1/auth/email/verify` | confirma o e-mail com o código recebido (204) |
-| `POST /api/v1/auth/email/resend` | reenvia a confirmação (Bearer, 204) |
+| `POST /api/v1/auth/email/resend` | reenvia a confirmação por e-mail; **sempre 204**, sem revelar se a conta existe |
 | `GET /api/v1/auth/sessions` | sessões ativas, com IP, dispositivo e `current` |
 | `DELETE /api/v1/auth/sessions/{familyId}` | encerra outra sessão (204) |
 
@@ -174,9 +177,12 @@ Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
 - Recuperação de senha: código opaco de 30 min, guardado como hash no Redis,
   uso único e amarrado ao `token_version` (trocar a senha invalida códigos
   pendentes). O pedido devolve 204 mesmo para e-mail inexistente.
-- Confirmação de e-mail: código de 7 dias, uso único. Trocar o e-mail zera a
-  confirmação. Com `security.require_email_verified = true`, o login exige
-  e-mail confirmado (403 até confirmar).
+- Confirmação de e-mail: código de 7 dias, uso único, amarrado ao
+  `token_version` e ao fingerprint do e-mail. Trocar o e-mail zera a
+  confirmação e invalida o código anterior. O reenvio é público por e-mail
+  (sempre 204) e limitado por conta/IP. Com
+  `security.require_email_verified = true`, o login exige e-mail confirmado
+  (403 até confirmar); o boot recusa essa combinação com `mail.provider = log`.
 - Sessões: cada login é uma família de refresh com IP e User-Agent no Redis.
   `GET /auth/sessions` lista e `DELETE` revoga; a sessão atual só sai pelo
   logout. Se o Redis reinicia, as sessões (e o código de recuperação) caem junto.
@@ -265,7 +271,8 @@ worker (a cada 15 s)
 - **Não duplica a linha**: `dedupe_key` é única por evento.
 - **Entrega at-least-once**: o envio precisa ser idempotente do lado do provedor.
 - **Retry**: 5 tentativas com backoff exponencial (1, 2, 4, 8, 16 min).
-- **Limpeza**: e-mails `sent` com mais de 30 dias são removidos pelo cron diário.
+- **Limpeza**: o corpo é apagado logo depois do envio; a linha `sent` fica só
+  com os metadados e é removida após 30 dias pelo cron diário.
 - **Lease**: item em `processing` há mais de 5 min volta a ser elegível.
 
 Eventos já ligados ao outbox: usuário criado (`users::service::create`, inclusive
@@ -336,7 +343,8 @@ src/
 tests/                      # integração com testcontainers
 ├── common/mod.rs           # containers, login e mailers de teste
 ├── api_flow.rs             # auth, perfil, usuários, rate limit, idempotência
-└── email_flow.rs           # outbox, dedupe e retry
+├── email_flow.rs           # outbox, dedupe, retry e limpeza do corpo
+└── email_verification.rs   # reenvio público, troca de e-mail e flag de login
 .github/workflows/ci.yml    # fmt, clippy, nextest, deny e docker build
 Dockerfile                  # imagem multi-stage, non-root
 

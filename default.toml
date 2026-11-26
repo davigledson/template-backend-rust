@@ -45,7 +45,8 @@ login_ip_attempts = 20
 login_window_secs = 900
 password_reset_account_attempts = 3
 password_reset_ip_attempts = 10
-verification_user_attempts = 3
+verification_account_attempts = 3
+verification_ip_attempts = 10
 
 [jobs]
 enabled = true

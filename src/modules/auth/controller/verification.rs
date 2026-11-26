@@ -1,13 +1,16 @@
-//! Confirmação de e-mail: código público e reenvio autenticado.
+//! Confirmação de e-mail: código público e reenvio público por e-mail.
 
 use axum::{extract::State, http::StatusCode};
 
 use crate::{
     core::{
-        auth::extractor::AuthUser, error::AppError, extract::ValidatedJson, openapi::Problem,
+        client_ip::ClientIp, error::AppError, extract::ValidatedJson, openapi::Problem,
         state::AppState,
     },
-    modules::auth::{dto::VerifyEmailRequest, service},
+    modules::auth::{
+        dto::{ResendVerificationRequest, VerifyEmailRequest},
+        service,
+    },
 };
 
 #[utoipa::path(
@@ -37,19 +40,22 @@ pub(super) async fn verify(
     path = "/auth/email/resend",
     tag = "auth",
     summary = "Reenvia o código de confirmação",
-    description = "Requer sessão válida. É limitado por usuário e não faz nada \
-                   se o e-mail já está confirmado.",
-    security(("bearer" = [])),
+    description = "Sempre devolve 204, exista ou não a conta ou o e-mail já \
+                   esteja confirmado, para não permitir enumeração. O pedido é \
+                   limitado por conta e por IP.",
+    request_body = ResendVerificationRequest,
     responses(
         (status = 204, description = "Pedido recebido"),
-        (status = 401, description = "Não autenticado ou sessão expirada", body = Problem),
+        (status = 400, description = "JSON inválido", body = Problem),
+        (status = 422, description = "Validação falhou", body = Problem),
         (status = 429, description = "Muitos reenvios", body = Problem),
     )
 )]
 pub(super) async fn resend(
     State(state): State<AppState>,
-    auth: AuthUser,
+    client_ip: ClientIp,
+    ValidatedJson(body): ValidatedJson<ResendVerificationRequest>,
 ) -> Result<StatusCode, AppError> {
-    service::resend_verification(&state, &auth).await?;
+    service::resend_verification(&state, body, client_ip.as_str()).await?;
     Ok(StatusCode::NO_CONTENT)
 }

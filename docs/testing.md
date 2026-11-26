@@ -69,8 +69,11 @@ próprio Postgres 18 e Redis 8:
 - `tests/api_flow.rs`: criação, listagem, autorização, troca de papel, soft
   delete, reset de senha, perfil, refresh, rate limit, idempotência, OpenAPI e
   métricas;
-- `tests/email_flow.rs`: outbox, entrega, dedupe, retry com backoff e
-  reprocessamento.
+- `tests/email_flow.rs`: outbox, entrega, dedupe, retry com backoff,
+  reprocessamento e corpo apagado após o envio;
+- `tests/email_verification.rs`: reenvio público sem sessão, rate limit por
+  conta, troca de e-mail invalidando o código anterior, confirmação manual,
+  auditoria e login com `require_email_verified = true`.
 
 O bloco de outbox prova as garantias:
 

@@ -42,6 +42,8 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just admin-create <email> "<nome>" [true]` | cria admin (primeiro, ou outro com `true`) |
 | `just admin-promote <email>` | promove usuário a admin |
 | `just admin-reset-password <email>` | redefine senha e invalida sessões |
+| `just admin-verify-email <email>` | confirma o e-mail de um usuário |
+| `just admin-verify-email-all` | confirma todos os e-mails pendentes |
 | `just outbox-list [status] [limit]` | lista e-mails do outbox |
 | `just outbox-retry <id>` | reprocessa um e-mail na hora |
 | `just outbox-retry-all [status] [force]` | reprocessa todos de um status |
@@ -140,9 +142,12 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 - Recuperação de senha: `POST /auth/password/forgot` **sempre 204** (sem
   enumeração); código opaco de 30 min, hash no Redis, uso único e amarrado ao
   `token_version`. `POST /auth/password/reset` troca a senha e derruba sessões.
-- Confirmação de e-mail: código de 7 dias, uso único; trocar o e-mail zera
-  `email_verified_at`. `security.require_email_verified` (padrão `false`)
-  transforma a confirmação em requisito de login.
+- Confirmação de e-mail: código de 7 dias, uso único, amarrado ao
+  `token_version` e ao fingerprint do e-mail; trocar o e-mail zera
+  `email_verified_at` e invalida o código anterior. O reenvio é público por
+  e-mail (sempre 204, rate limit por conta/IP). `security.require_email_verified`
+  (padrão `false`) transforma a confirmação em requisito de login, mas o boot
+  recusa essa combinação com `mail.provider = log`.
 - Sessões por dispositivo: uma entrada por família de refresh no Redis
   (`auth:session:<user>:<family>`), com IP e User-Agent. `GET/DELETE
   /auth/sessions` exige `require_session`; a sessão atual só sai pelo logout.
@@ -217,8 +222,9 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 
 - Toda regra de service tem teste unitário.
 - Todo endpoint novo tem teste de integração (testcontainers) em
-  `tests/api_flow.rs`; o outbox fica em `tests/email_flow.rs`. Os helpers
-  (containers, login, mailers) estão em `tests/common/mod.rs`.
+  `tests/api_flow.rs`; o outbox fica em `tests/email_flow.rs` e a confirmação
+  de e-mail em `tests/email_verification.rs`. Os helpers (containers, login,
+  mailers, código no outbox) estão em `tests/common/mod.rs`.
 - Cada binário de teste sobe seu Postgres/Redis: nada de estado compartilhado
   entre fluxos.
 - Autorização e idempotência têm teste próprio.

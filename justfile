@@ -75,6 +75,14 @@ admin-promote email:
 admin-reset-password email:
     cargo run --quiet --bin admin -- reset-password --email {{email}}
 
+# Confirma o e-mail de um usuário (rollout de require_email_verified).
+admin-verify-email email:
+    cargo run --quiet --bin admin -- verify-email --email {{email}}
+
+# Confirma o e-mail de todos os usuários pendentes (backfill).
+admin-verify-email-all:
+    cargo run --quiet --bin admin -- verify-email --all
+
 # Lista e-mails do outbox por status (pending, failed ou sent).
 outbox-list status="failed" limit="20":
     cargo run --quiet --bin admin -- outbox list --status {{status}} --limit {{limit}}

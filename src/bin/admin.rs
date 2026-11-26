@@ -55,6 +55,15 @@ enum Command {
         #[arg(long)]
         email: String,
     },
+    /// Confirma o e-mail de um usuário ou de todos os pendentes.
+    VerifyEmail {
+        /// E-mail do usuário; omita com --all para o backfill.
+        #[arg(long, conflicts_with = "all")]
+        email: Option<String>,
+        /// Confirma todos os usuários com e-mail pendente.
+        #[arg(long)]
+        all: bool,
+    },
     /// Inspeciona e reprocessa o outbox de e-mail.
     Outbox {
         #[command(subcommand)]
@@ -106,6 +115,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Promote { email } => promote(&db, &email).await?,
         Command::ResetPassword { email } => reset_password(&db, &email).await?,
+        Command::VerifyEmail { email, all } => verify_email(&db, email.as_deref(), all).await?,
         Command::Outbox { action } => outbox(&db, action).await?,
     }
 
@@ -170,6 +180,31 @@ async fn reset_password(
     let password = read_password(true)?;
     service::set_password(db, Actor::system(), user.id, &password).await?;
     println!("senha redefinida para {}", user.email);
+    Ok(())
+}
+
+async fn verify_email(
+    db: &DatabaseConnection,
+    email: Option<&str>,
+    all: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if all {
+        let total = service::verify_all_emails(db, Actor::system()).await?;
+        println!("e-mails confirmados: {total}");
+        return Ok(());
+    }
+
+    let email = email.ok_or("informe --email ou --all")?;
+    let user = service::find_by_email(db, email)
+        .await?
+        .ok_or("usuário não encontrado")?;
+
+    if service::verify_email(db, Actor::system(), user.id).await? {
+        println!("e-mail confirmado: {}", user.email);
+    } else {
+        println!("e-mail já estava confirmado: {}", user.email);
+    }
+
     Ok(())
 }
 

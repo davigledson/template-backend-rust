@@ -4,11 +4,17 @@
 //! e-mail) e `auth` consome (rota pública de confirmação).
 //!
 //! - guardado apenas como hash SHA-256, com TTL de 7 dias;
-//! - uso único: o consumo é um `GET` + `DEL` atômico.
+//! - uso único: o consumo é um `GET` + `DEL` atômico;
+//! - o valor carrega `token_version` (trocar senha/papel invalida) e o
+//!   fingerprint do e-mail (trocar o endereço invalida o código pendente).
 
 use uuid::Uuid;
 
-use crate::core::{auth::hash::sha256_hex, cache::Cache, error::AppError};
+use crate::core::{
+    auth::hash::{email_fingerprint, sha256_hex},
+    cache::Cache,
+    error::AppError,
+};
 
 const PREFIX: &str = "auth:email-verify:";
 const TTL_SECS: i64 = 7 * 24 * 60 * 60;
@@ -22,13 +28,21 @@ return value
 ";
 
 /// Gera e guarda um token novo; devolve o valor em claro para o e-mail.
-pub async fn issue(cache: &Cache, user_id: Uuid) -> Result<String, AppError> {
+pub async fn issue(
+    cache: &Cache,
+    user_id: Uuid,
+    token_version: i32,
+    email: &str,
+) -> Result<String, AppError> {
     let token = generate_token();
     let mut connection = cache.pool().get().await?;
 
     let _: String = redis::cmd("SET")
         .arg(key_for(&token))
-        .arg(user_id.to_string())
+        .arg(format!(
+            "{user_id}:{token_version}:{}",
+            email_fingerprint(email)
+        ))
         .arg("EX")
         .arg(TTL_SECS)
         .query_async(&mut connection)
@@ -38,7 +52,7 @@ pub async fn issue(cache: &Cache, user_id: Uuid) -> Result<String, AppError> {
 }
 
 /// Valida e invalida o token. `None` se expirado, já usado ou desconhecido.
-pub async fn consume(cache: &Cache, token: &str) -> Result<Option<Uuid>, AppError> {
+pub async fn consume(cache: &Cache, token: &str) -> Result<Option<(Uuid, i32, String)>, AppError> {
     let mut connection = cache.pool().get().await?;
 
     let value: Option<String> = redis::Script::new(CONSUME_SCRIPT)
@@ -46,7 +60,20 @@ pub async fn consume(cache: &Cache, token: &str) -> Result<Option<Uuid>, AppErro
         .invoke_async(&mut connection)
         .await?;
 
-    Ok(value.and_then(|value| Uuid::parse_str(&value).ok()))
+    Ok(value.as_deref().and_then(parse_value))
+}
+
+fn parse_value(value: &str) -> Option<(Uuid, i32, String)> {
+    let mut parts = value.split(':');
+    let user_id = Uuid::parse_str(parts.next()?).ok()?;
+    let token_version = parts.next()?.parse().ok()?;
+    let fingerprint = parts.next()?.to_owned();
+
+    if parts.next().is_some() {
+        return None;
+    }
+
+    Some((user_id, token_version, fingerprint))
 }
 
 fn generate_token() -> String {
@@ -60,6 +87,20 @@ fn key_for(token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn valor_ida_e_volta() {
+        let user_id = Uuid::now_v7();
+        let fingerprint = email_fingerprint("ana@teste.local");
+        let value = format!("{user_id}:4:{fingerprint}");
+
+        assert_eq!(parse_value(&value), Some((user_id, 4, fingerprint)));
+        assert_eq!(parse_value("sem-dois-pontos"), None);
+        assert_eq!(parse_value("nao-uuid:4:abcd"), None);
+        assert_eq!(parse_value("nao-uuid"), None);
+        assert_eq!(parse_value(&format!("{user_id}:x:abcd")), None);
+        assert_eq!(parse_value(&format!("{user_id}:1:abcd:extra")), None);
+    }
 
     #[test]
     fn chave_nao_guarda_token_em_claro() {

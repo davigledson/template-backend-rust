@@ -26,4 +26,6 @@ pub use lookup::{find_by_email, find_by_id, list, normalize_email};
 pub use profile::update_profile;
 pub use session::{count_active_admins, require_session};
 pub use update::{UserUpdate, deactivate, set_role, update};
-pub use verification::{mark_email_verified, send_email_verification};
+pub use verification::{
+    mark_email_verified, send_email_verification, verify_all_emails, verify_email,
+};

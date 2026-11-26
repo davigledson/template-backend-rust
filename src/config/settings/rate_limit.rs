@@ -16,8 +16,10 @@ pub struct RateLimitSettings {
     pub password_reset_account_attempts: u32,
     /// Pedidos de recuperação de senha por IP dentro da janela.
     pub password_reset_ip_attempts: u32,
-    /// Reenvios de confirmação de e-mail por usuário dentro da janela.
-    pub verification_user_attempts: u32,
+    /// Reenvios de confirmação de e-mail por conta dentro da janela.
+    pub verification_account_attempts: u32,
+    /// Reenvios de confirmação de e-mail por IP dentro da janela.
+    pub verification_ip_attempts: u32,
 }
 
 impl RateLimitSettings {
@@ -44,9 +46,13 @@ impl RateLimitSettings {
             problems
                 .push("rate_limit.password_reset_ip_attempts deve ser maior que zero".to_owned());
         }
-        if self.verification_user_attempts == 0 {
-            problems
-                .push("rate_limit.verification_user_attempts deve ser maior que zero".to_owned());
+        if self.verification_account_attempts == 0 {
+            problems.push(
+                "rate_limit.verification_account_attempts deve ser maior que zero".to_owned(),
+            );
+        }
+        if self.verification_ip_attempts == 0 {
+            problems.push("rate_limit.verification_ip_attempts deve ser maior que zero".to_owned());
         }
     }
 }
@@ -59,7 +65,8 @@ impl Default for RateLimitSettings {
             login_window_secs: 900,
             password_reset_account_attempts: 3,
             password_reset_ip_attempts: 10,
-            verification_user_attempts: 3,
+            verification_account_attempts: 3,
+            verification_ip_attempts: 10,
         }
     }
 }
@@ -84,7 +91,8 @@ mod tests {
             login_window_secs: 0,
             password_reset_account_attempts: 0,
             password_reset_ip_attempts: 0,
-            verification_user_attempts: 0,
+            verification_account_attempts: 0,
+            verification_ip_attempts: 0,
         };
         let message = errors(&settings);
         assert!(message.contains("login_account_attempts"), "{message}");
