@@ -56,8 +56,17 @@ pub async fn login(
 
     let candidate = users_service::find_by_email(&state.db, &email).await?;
     let password_ok = match candidate.as_ref() {
-        Some(user) if user.active => password::verify(&request.password, &user.password_hash)?,
-        _ => false,
+        Some(user) if user.active => {
+            password::verify_async(request.password.clone(), user.password_hash.clone()).await?
+        }
+        _ => {
+            // Mesmo custo para conta inexistente/inativa: não vaza existência
+            // por tempo de resposta.
+            let _ =
+                password::verify_async(request.password.clone(), password::DUMMY_HASH.to_owned())
+                    .await;
+            false
+        }
     };
 
     let Some(user) = candidate.filter(|_| password_ok) else {

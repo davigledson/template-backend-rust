@@ -48,7 +48,7 @@ pub async fn create(
     password::validate_strength(&input.password)
         .map_err(|error| AppError::BadRequest(error.to_string()))?;
 
-    let password_hash = password::hash(&input.password)?;
+    let password_hash = password::hash_async(input.password.clone()).await?;
     let now = Utc::now().fixed_offset();
     let txn = db.begin().await?;
 

@@ -26,7 +26,7 @@ pub async fn set_password(
     password::validate_strength(new_password)
         .map_err(|error| AppError::BadRequest(error.to_string()))?;
 
-    let password_hash = password::hash(new_password)?;
+    let password_hash = password::hash_async(new_password.to_owned()).await?;
     let txn = db.begin().await?;
 
     let updated = repository::set_password(&txn, id, &password_hash).await?;
@@ -75,10 +75,10 @@ pub async fn change_own_password(
 ) -> Result<(), AppError> {
     let user = require_session(db, auth).await?;
 
-    if !password::verify(current_password, &user.password_hash)? {
+    if !password::verify_async(current_password.to_owned(), user.password_hash.clone()).await? {
         return Err(AppError::Unauthorized("senha atual incorreta".to_owned()));
     }
-    if password::verify(new_password, &user.password_hash)? {
+    if password::verify_async(new_password.to_owned(), user.password_hash.clone()).await? {
         return Err(AppError::BadRequest(
             "a nova senha deve ser diferente da atual".to_owned(),
         ));
@@ -86,7 +86,7 @@ pub async fn change_own_password(
     password::validate_strength(new_password)
         .map_err(|error| AppError::BadRequest(error.to_string()))?;
 
-    let password_hash = password::hash(new_password)?;
+    let password_hash = password::hash_async(new_password.to_owned()).await?;
     let txn = db.begin().await?;
 
     let updated = repository::set_password(&txn, user.id, &password_hash).await?;
@@ -131,7 +131,7 @@ pub async fn reset_password_with_code(
     password::validate_strength(new_password)
         .map_err(|error| AppError::BadRequest(error.to_string()))?;
 
-    let password_hash = password::hash(new_password)?;
+    let password_hash = password::hash_async(new_password.to_owned()).await?;
     let txn = db.begin().await?;
 
     let user = repository::find_by_id(&txn, user_id)
