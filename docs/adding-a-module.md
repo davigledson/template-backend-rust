@@ -17,8 +17,18 @@ Responda no papel:
 
 ## 1. Migration
 
-Crie `src/migrations/mYYYYMMDD_HHMMSS_create_notes.rs`. O nome do arquivo é o nome
-da migration; registre em `src/migrations/mod.rs`.
+Gere o arquivo e o registro:
+
+```bash
+just migration create_notes
+```
+
+Isso cria `src/migrations/mYYYYMMDD_HHMMSS_create_notes.rs` e adiciona a migration
+em `src/migrations/mod.rs` e em `Migrator::migrations()`. Preencha `up` e
+`down`; o template vem com `todo!()`.
+
+O CLI serve só para gerar. Para aplicar, use `just migrate`: os comandos
+`sea-orm-cli migrate up/status/down` esperam uma migration crate separada.
 
 ```rust
 use sea_orm_migration::{prelude::*, schema::*};

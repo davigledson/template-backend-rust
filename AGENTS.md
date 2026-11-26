@@ -30,6 +30,7 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just doctor` | versões, containers e `.env` |
 | `just up` / `down` / `reset` | infra (reset apaga volumes) |
 | `just migrate` | aplica migrations pendentes |
+| `just migration <nome>` | gera uma migration vazia e registra no `mod.rs` |
 | `just dev` | API em `http://localhost:8080` |
 | `just worker` | worker de cron |
 | `just mail-up` / `just mail-down` | Mailpit local (SMTP 1025, UI 8025) |
@@ -190,7 +191,7 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 - Tabelas e colunas em `snake_case`; tabela no plural.
 - Toda FK e todo filtro/ordenação usado em query tem índice.
 - Desativação por `active` (soft delete); `version` para concorrência otimista.
-- Migration em `src/migrations/mYYYYMMDD_HHMMSS_nome.rs`; depois `just entities`.
+- Gere a migration com `just migration <nome>`; depois `just entities`.
 - Nunca edite uma migration já aplicada; crie outra.
 
 ## API

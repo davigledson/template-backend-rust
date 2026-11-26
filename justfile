@@ -65,6 +65,10 @@ mail-down:
 migrate:
     cargo run --bin migrator
 
+# Gera uma migration vazia e registra no mod.rs.
+migration name:
+    PATH="$HOME/.cargo/bin:$PATH" sea-orm-cli migrate generate {{name}} -d src/migrations
+
 # Cria um administrador (o primeiro do banco, ou outro com --force).
 admin-create email name force="false":
     cargo run --quiet --bin admin -- create --email {{email}} --name "{{name}}" {{ if force == "true" { "--force" } else { "" } }}
