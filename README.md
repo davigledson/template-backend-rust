@@ -47,13 +47,14 @@ Para adicionar outro domínio, crie um módulo seguindo
 | `rustup` | sim | a versão está em `rust-toolchain.toml` |
 | Docker + Compose | sim | sobe Postgres, Redis e Mailpit local |
 | `just` | sim | todos os comandos do projeto |
+| `lld` | sim | linker configurado em `.cargo/config.toml` |
 | `cargo-nextest` | recomendada | `just test`, `just ci-fast` |
 | `sea-orm-cli` 2.0.4 | só ao mexer no schema | `just entities` |
 | `cargo-deny` | recomendada | `just deny`, CI |
 
 ```bash
 # Arch/CachyOS
-sudo pacman -S --needed base-devel pkg-config just cargo-nextest cargo-deny
+sudo pacman -S --needed base-devel pkg-config lld just cargo-nextest cargo-deny
 cargo install sea-orm-cli --version 2.0.4 --locked
 ```
 
@@ -111,6 +112,7 @@ Regras práticas:
 | `just up` / `just down` / `just reset` | infra local (reset apaga volumes) |
 | `just docker-build` | build da imagem em `docker/Dockerfile` |
 | `just prod-migrate` / `just prod-up` | stack de deploy: migrations e aplicação |
+| `just prod-admin <args>` | CLI admin na stack de deploy |
 | `just prod-down` / `just prod-logs` | derruba ou acompanha a stack de deploy |
 | `just dev` | API com logs legíveis |
 | `just worker` | entrega do outbox e limpeza diária (cron) |
@@ -143,8 +145,11 @@ Precedência (do menor para o maior):
 
 1. `default.toml` — padrões versionados e seguros;
 2. `config/<perfil>.toml` — overrides por ambiente;
-3. variáveis `APP__*` — `APP__DATABASE__URL` vira `database.url`;
-4. `.env` — **apenas em desenvolvimento**, nunca versionado.
+3. variáveis `APP__*` — `APP__DATABASE__URL` vira `database.url`.
+
+O `.env` não é uma camada acima: em `development` ele só preenche variáveis que
+ainda não estão no ambiente. Uma variável exportada no shell vence o `.env`.
+Em produção, a aplicação nem lê o arquivo.
 
 | Lugar | Use para | Versionar? |
 |---|---|---|
@@ -154,9 +159,9 @@ Precedência (do menor para o maior):
 | `.env` | segredos e portas da sua máquina | **não** |
 | ambiente do deploy | segredos e URLs reais (`APP__*`) | **não** |
 
-O `.env` **não é carregado em produção**: o `dotenvy` só roda no perfil
-`development`. Em produção, injete as variáveis pelo ambiente, Docker secrets
-ou secret manager do provedor.
+`APP_PROFILE` aceita `development`, `production` ou um nome com arquivo em
+`config/<perfil>.toml`; perfil desconhecido falha no boot. Em produção, injete as
+variáveis pelo ambiente, Docker secrets ou secret manager do provedor.
 
 ### Nome das variáveis
 
@@ -306,7 +311,7 @@ Rotas sensíveis conferem a sessão no banco (`require_session`): usuário ativo
 | `GET /api/v1/users` | `users:read` | lista com `page`, `perPage`, `search`, `role`, `active` |
 | `POST /api/v1/users` | `users:write` | cria usuário; exige `Idempotency-Key` e devolve `Location` |
 | `GET /api/v1/users/{id}` | `users:read` | detalhe |
-| `PATCH /api/v1/users/{id}` | `users:write` | atualiza `name`, `email`, `role`, `active` |
+| `PATCH /api/v1/users/{id}` | `users:write` | atualiza `name`, `email`, `role`, `active`; aceita `version` |
 | `DELETE /api/v1/users/{id}` | `users:delete` | soft delete (`active = false`), idempotente |
 | `PUT /api/v1/users/{id}/password` | `users:write` | redefine a senha e invalida as sessões |
 | `GET /api/v1/audit` | `audit:read` | histórico de ações privilegiadas, com filtros |
@@ -316,7 +321,9 @@ Proteções:
 - admin não desativa nem rebaixa a si mesmo;
 - não é possível remover o último admin ativo;
 - mudar papel ou desativar derruba as sessões;
-- `PATCH` usa `version` para concorrência otimista (409 se alguém alterou antes);
+- `PATCH` aceita a `version` devolvida por `GET /users/{id}`; se ela já mudou,
+  devolve `409`. Sem `version`, o servidor usa a versão lida na transação e só
+  detecta escritas simultâneas;
 - `DELETE` repetido devolve `204`.
 
 ## Idempotência
@@ -413,6 +420,7 @@ docker/
 
 tests/                      # integração com testcontainers
 ├── common/mod.rs           # containers, login, mailers e helpers
+├── admin_invariant.rs      # concorrência do último admin
 ├── api_flow.rs             # auth, perfil, usuários, rate limit, idempotência
 ├── auth_recovery_flow.rs   # reset de senha, confirmação e sessões
 ├── email_flow.rs           # outbox, dedupe, retry e limpeza do corpo

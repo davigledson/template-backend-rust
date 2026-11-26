@@ -9,11 +9,11 @@ O `docker/Dockerfile` é multi-stage:
 
 - build em `rust:1.99.1-slim-bookworm`;
 - runtime em `debian:bookworm-slim`;
-- binários `api`, `worker` e `migrator`;
+- binários `api`, `worker`, `migrator` e `admin`;
 - processo roda como usuário `app` (UID 10001), sem privilégios.
 
-`api` e `worker` usam a mesma imagem com comandos diferentes. `migrate` fica no
-perfil `tools` do compose. Os arquivos ficam em [`docker/`](docker/):
+`api` e `worker` usam a mesma imagem com comandos diferentes. `migrate` e
+`admin` ficam no perfil `tools` do compose. Os arquivos ficam em [`docker/`](docker/):
 
 | Arquivo | Uso |
 |---|---|
@@ -29,16 +29,19 @@ just docker-build
 
 ## Variáveis de produção
 
-O `.env` **não é carregado em produção**: o `dotenvy` só roda no perfil
-`development`. Injete os valores pelo ambiente, Docker secrets ou secret manager
-do provedor.
+O `.env` **não é carregado pela aplicação em produção**: o `dotenvy` só roda no
+perfil `development`. Injete os valores pelo ambiente, Docker secrets ou secret
+manager do provedor. O `just` não carrega `.env` nas receitas `prod-*`; para um
+arquivo de produção, use `APP_ENV_FILE=.env.production just prod-up`.
 
 | Variável | Obrigatória | Observação |
 |---|---|---|
 | `APP_PROFILE` | sim | use `production` |
 | `APP__JWT__SECRET` | sim | mínimo 32 caracteres; trocar invalida todos os tokens |
-| `APP__DATABASE__URL` | sim | URL do Postgres |
+| `APP__DATABASE__URL` | sim | URL do Postgres; mantenha igual à senha do container |
 | `APP__REDIS__URL` | sim | URL do Redis |
+| `POSTGRES_PASSWORD` | sim (Compose) | senha do container Postgres, sem default em produção |
+| `POSTGRES_USER` / `POSTGRES_DB` | não | padrão `app` |
 | `APP__MAIL__PROVIDER` | sim | `smtp` em produção |
 | `APP__MAIL__SMTP_URL` | com `smtp` | ex.: `smtps://user:senha@host:465` |
 | `APP__MAIL__FROM` | sim | remetente válido |
@@ -75,13 +78,17 @@ O compose de deploy usa os perfis:
 |---|---|---|
 | (nenhum) | `postgres`, `redis` | dependências do deploy |
 | `app` | `api`, `worker` | aplicação |
-| `tools` | `migrate` | migrations explícitas |
+| `tools` | `migrate`, `admin` | migrations e bootstrap explícitos |
 
-O worker deve rodar em **uma instância só** para evitar disputa de lease do
+O worker pode rodar em mais de uma instância: o claim usa
+`FOR UPDATE SKIP LOCKED`. Uma instância é o padrão; várias aumentam a vazão do
 outbox. A API pode ter mais de uma réplica atrás de um proxy.
 
 Sempre use `--project-directory .` com o compose dentro de `docker/`, para
-manter o `.env` da raiz e os caminhos relativos.
+manter os caminhos relativos. As receitas `prod-*` usam
+`--env-file ${APP_ENV_FILE:-/dev/null}` para **não** herdar o `.env` de
+desenvolvimento; exporte as variáveis no shell ou aponte `APP_ENV_FILE` para o
+arquivo de produção.
 
 ## Gate de produção
 
@@ -100,21 +107,25 @@ para que cada `v*` passe pelo build e pelo compose antes do release.
 ## Passo a passo
 
 ```bash
-# 1. schema (antes de subir a API nova)
-docker compose --project-directory . -f docker/compose.deploy.yml \
-  --profile tools run --rm --build migrate
+# 1. defina os segredos no shell (ou use APP_ENV_FILE)
+export POSTGRES_PASSWORD="$(openssl rand -base64 32)"
+export APP__DATABASE__URL="postgres://app:${POSTGRES_PASSWORD}@postgres:5432/app"
+export APP__JWT__SECRET="$(openssl rand -base64 48)"
 
-# 2. aplicação
-APP__JWT__SECRET="$(openssl rand -base64 48)" \
-  docker compose --project-directory . -f docker/compose.deploy.yml \
-  --profile app up -d --build api worker
+# 2. schema (antes de subir a API nova)
+just prod-migrate
+
+# 3. aplicação
+just prod-up
 ```
 
-Ou pelos atalhos:
+Equivalente sem `just`:
 
 ```bash
-just prod-migrate
-APP__JWT__SECRET="$(openssl rand -base64 48)" just prod-up
+docker compose --project-directory . --env-file /dev/null \
+  -f docker/compose.deploy.yml --profile tools run --rm --build migrate
+docker compose --project-directory . --env-file /dev/null \
+  -f docker/compose.deploy.yml --profile app up -d --build api worker
 ```
 
 Verificação:
@@ -129,11 +140,25 @@ curl -fsS -H "authorization: Bearer $METRICS_TOKEN" \
 Se `metrics.token` estiver vazio, o `/metrics` fica público; restrinja no proxy
 ou na rede de monitoramento.
 
+## Primeiro admin
+
+O CLI roda na mesma imagem, pelo perfil `tools`:
+
+```bash
+ADMIN_PASSWORD='uma-senha-bem-longa-123' \
+  just prod-admin create --email admin@empresa.com --name "Admin"
+```
+
+Depois do primeiro admin, `--force` libera a criação de outros. Para manter o
+banco, use `just prod-admin promote --email ...`,
+`just prod-admin reset-password --email ...` ou
+`just prod-admin verify-email --email ...`.
+
 ## Migrations
 
 - São explícitas: nunca rodam no boot da API.
 - Aplicar antes de subir a versão nova:
-  `just prod-migrate` (ou `docker compose --project-directory . -f docker/compose.deploy.yml --profile tools run --rm --build migrate`).
+  `just prod-migrate` (ou `docker compose --project-directory . --env-file /dev/null -f docker/compose.deploy.yml --profile tools run --rm --build migrate`).
 - São **forward-only**. Rollback de imagem só funciona se a migration for
   compatível (coluna nullable/default ou expand/contract).
 - Mudou o schema? Gere a entidade com `just entities` e teste em banco limpo.
@@ -158,6 +183,8 @@ Verificações:
 ## Checklist de segurança
 
 - [ ] `APP__JWT__SECRET` forte e fora do repositório.
+- [ ] `POSTGRES_PASSWORD` forte e `APP__DATABASE__URL` consistente.
+- [ ] Primeiro admin criado (`just prod-admin create ...`).
 - [ ] `APP__MAIL__PROVIDER=smtp` com `smtps://` real; Mailpit desligado.
 - [ ] `docs.enabled = false` em produção pública.
 - [ ] `/metrics` com token ou restrito à rede.

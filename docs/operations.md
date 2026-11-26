@@ -9,12 +9,16 @@ host e quando crescer, ver `capacity.md`.
 | Binário | Papel | Observação |
 |---|---|---|
 | `api` | HTTP em `/api/v1`, `/docs` (se ligado) e `/metrics` (se ligado) | sem cron; pode ter mais de uma instância |
-| `worker` | cron do outbox (15 s) e limpeza diária (outbox + auditoria) | **uma instância só** evita disputa de lease |
+| `worker` | cron do outbox (15 s) e limpeza diária (outbox + auditoria) | uma instância é o padrão; várias são suportadas pelo `SKIP LOCKED` |
 | `migrator` | aplica migrations e sai | nunca roda no boot da API |
 | `admin` | bootstrap e manutenção | não é serviço |
 
 O worker precisa estar rodando para e-mail sair do `email_outbox`. Sem ele, o
 e-mail fica `pending` para sempre.
+
+Os comandos com `docker/compose.deploy.yml` abaixo exigem as mesmas variáveis do
+deploy no ambiente (`POSTGRES_PASSWORD`, `APP__DATABASE__URL` e
+`APP__JWT__SECRET`) ou um `APP_ENV_FILE` com elas.
 
 ## Deploy
 

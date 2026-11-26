@@ -41,6 +41,7 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just deny` | licenças, advisories e fontes |
 | `just docker-build` | imagem de produção (`docker/Dockerfile`) |
 | `just prod-migrate` | aplica migrations na stack de deploy |
+| `just prod-admin <args>` | roda o CLI admin na stack de deploy |
 | `just prod-up` | sobe infra + api + worker de deploy |
 | `just prod-down` | derruba a stack de deploy |
 | `just prod-logs` | acompanha os logs da stack de deploy |
@@ -313,6 +314,7 @@ Se não couber em uma pasta, o módulo está grande demais.
 - `just entities` **sobrescreve** `src/database/entity/`.
 - Receitas do `just` não aceitam `:` no nome (`admin-create`, não `admin:create`).
 - `.env` só é carregado no perfil `development`.
+- `just prod-*` não carrega `.env`; exporte as variáveis ou use `APP_ENV_FILE`.
 - API e worker validam a configuração; `migrator` e `admin` usam `load_unvalidated`.
 - Portas do host: **55432** (Postgres) e **56379** (Redis).
 - Entidade usa `DateTimeWithTimeZone`; converta para `Utc` no DTO.

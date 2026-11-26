@@ -111,10 +111,15 @@ Scalar em `/docs` quando `docs.enabled = true`; produção desliga por padrão.
 Ordem de precedência (a última vence):
 
 ```text
-default.toml → config/<perfil>.toml → variáveis APP__* → .env (só em development)
+default.toml → config/<perfil>.toml → variáveis APP__*
 ```
 
-- O perfil vem de `APP_PROFILE` (padrão `development`).
+O `.env` **não é uma camada acima**: em `development`, o `dotenvy` carrega o
+arquivo para o ambiente sem sobrescrever variáveis já exportadas. Ou seja, o
+shell vence o `.env`; em produção o `.env` nem é lido pela aplicação.
+
+- O perfil vem de `APP_PROFILE` (padrão `development`). Nome inválido ou perfil
+  sem `config/<perfil>.toml` falha no boot, em vez de cair nos defaults.
 - O `.env` **só** é carregado em `development`; em produção tudo vem do ambiente.
 - `APP__JWT__SECRET` não tem valor padrão e é obrigatório; o boot falha se tiver
   menos de 32 caracteres.
