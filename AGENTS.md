@@ -32,6 +32,7 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just up` / `down` / `reset` | infra (reset apaga volumes) |
 | `just migrate` | aplica migrations pendentes |
 | `just migration <nome>` | gera uma migration vazia e registra no `mod.rs` |
+| `just module <nome>` | gera o esqueleto de um módulo (rota 501) |
 | `just dev` | API em `http://localhost:8080` |
 | `just worker` | worker de cron |
 | `just mail-up` / `just mail-down` | Mailpit local (SMTP 1025, UI 8025) |
@@ -263,13 +264,14 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 
 ## Novo módulo
 
-1. Migration da tabela (dono: o módulo).
-2. `just migrate` e `just entities`.
-3. `dto.rs` (input/output + validação).
-4. `repository.rs` (queries).
-5. `service.rs` (só se houver regra).
-6. `controller.rs` (handlers + `router()`).
-7. Uma linha em `modules/mod.rs` (`nest`).
+1. `just module <nome>`: cria o esqueleto (controller/service/repository/dto),
+   registra no router e gera a rota 501 no OpenAPI.
+2. Migration da tabela (dono: o módulo).
+3. `just migrate` e `just entities`.
+4. `dto.rs` (input/output + validação).
+5. `repository.rs` (queries).
+6. `service.rs` (só se houver regra).
+7. `controller.rs` (handlers + `router()`; troque o 501).
 8. Permissões novas no catálogo, se houver.
 9. Testes unitários + integração.
 10. OpenAPI e `docs/` atualizados.

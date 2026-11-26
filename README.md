@@ -131,6 +131,7 @@ Regras práticas:
 | `just mail-up` / `just mail-down` | Mailpit local: SMTP 1025 e UI 8025 |
 | `just migrate` | migrations pendentes |
 | `just migration <nome>` | gera uma migration vazia e registra no `mod.rs` |
+| `just module <nome>` | gera o esqueleto de um módulo (rota 501 + OpenAPI) |
 | `just admin-create <email> "<nome>" [true]` | cria o primeiro admin (ou outro com `true`) |
 | `just admin-promote <email>` | promove usuário existente a admin |
 | `just admin-reset-password <email>` | redefine a senha e invalida as sessões |

@@ -5,6 +5,21 @@ Tutorial com o código real do template. Exemplo: um recurso `notes`
 
 > Regra de bolso: se o módulo não couber em uma pasta, ele está grande demais.
 
+## Atalho: gerar o esqueleto
+
+```bash
+just module notes            # cria src/modules/notes e registra no router
+just module notas_fiscais --dry-run
+```
+
+O gerador cria `mod.rs`, `controller.rs`, `service.rs`, `repository.rs` e
+`dto.rs`, registra o módulo em `src/modules/mod.rs`, adiciona `.merge()` no
+router e atualiza o snapshot do OpenAPI. A rota nasce autenticada e responde
+`501` até você trocá-la pela regra real. Nome com hífen/underscore/espaço é
+normalizado para `snake_case`; a rota usa hífen (`/notas-fiscais`).
+
+Depois do esqueleto, siga a migration e o restante do tutorial.
+
 ## 0. Antes de escrever código
 
 Responda no papel:
