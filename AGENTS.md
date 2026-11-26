@@ -27,6 +27,7 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | Comando | O que faz |
 |---|---|
 | `just setup` | `.env`, infra e dependências |
+| `just rename <nome>` | renomeia o projeto a partir do template |
 | `just doctor` | versões, containers e `.env` |
 | `just up` / `down` / `reset` | infra (reset apaga volumes) |
 | `just migrate` | aplica migrations pendentes |
@@ -315,6 +316,8 @@ Se não couber em uma pasta, o módulo está grande demais.
 - `jsonwebtoken` 12 exige a feature `rust_crypto` (já configurada).
 - O refresh usa script Lua (GET + DEL + SET do marcador); Redis 8 é o alvo.
 - `just entities` **sobrescreve** `src/database/entity/`.
+- Projeto novo de cliente: `just rename <nome>` (ver `docs/rename.md`); não edite
+  crate, imports, compose e tags à mão.
 - Receitas do `just` não aceitam `:` no nome (`admin-create`, não `admin:create`).
 - `.env` só é carregado no perfil `development`.
 - `just prod-*` não carrega `.env`; exporte as variáveis ou use `APP_ENV_FILE`.

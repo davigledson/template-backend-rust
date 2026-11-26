@@ -78,6 +78,17 @@ As portas do host são configuráveis no `.env` (`POSTGRES_PORT`, `REDIS_PORT`) 
 por padrão usam **55432** e **56379**, para não colidir com outros projetos que
 já ocupam 5432/6379.
 
+### Projeto novo a partir do template
+
+```bash
+just rename seu-projeto --dry-run   # mostra o que mudaria
+just rename seu-projeto             # pede confirmação
+```
+
+Troca crate, imports, compose, tags, OpenAPI e issuer/audience do JWT; a prosa
+que fala “template” fica. Detalhes e checklist em
+[`docs/rename.md`](docs/rename.md).
+
 ## Escolha o recurso certo
 
 | Necessidade | Use | Onde |
@@ -108,6 +119,7 @@ Regras práticas:
 | Comando | Faz |
 |---|---|
 | `just setup` | prepara `.env`, sobe a infra e baixa dependências |
+| `just rename <nome>` | renomeia o projeto a partir do template |
 | `just doctor` | versões, estado dos containers e do `.env` |
 | `just up` / `just down` / `just reset` | infra local (reset apaga volumes) |
 | `just docker-build` | build da imagem em `docker/Dockerfile` |
@@ -433,8 +445,8 @@ tests/                      # integração com Postgres/Redis reais
 .github/workflows/production.yml # build e smoke de runtime, manual (tag em produção)
 .github/workflows/smoke.yml # smoke pós-deploy contra BASE_URL
 .config/nextest.toml        # retries, timeouts e setup da infra de teste
-scripts/                    # hooks locais e setup da infra de teste
-docs/                       # arquitetura, segurança, testes e operação
+scripts/                    # hooks, infra de teste e rename do projeto
+docs/                       # arquitetura, segurança, testes, operação e rename
 deploy.md                   # build, compose, migrations e checklist de produção
 ```
 
