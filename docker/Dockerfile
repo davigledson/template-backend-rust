@@ -1,5 +1,6 @@
+# syntax=docker/dockerfile:1.7
 # Imagem de produção: build multi-stage, binários estáticos no runtime mínimo,
-# processo sem privilégios. O serviço `worker` usa a mesma imagem com outro comando.
+# processo sem privilégios. `worker`, `migrator` e `admin` usam a mesma imagem.
 
 FROM rust:1.99.1-slim-bookworm AS builder
 
@@ -8,7 +9,15 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY src ./src
 
-RUN cargo build --release --locked --bin api --bin worker --bin migrator
+# Cache mounts mantêm registry e target entre builds; os binários são copiados
+# para /out porque o conteúdo do cache mount não entra na camada.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/target \
+    cargo build --release --locked \
+        --bin api --bin worker --bin migrator --bin admin \
+    && mkdir -p /out \
+    && cp target/release/api target/release/worker target/release/migrator \
+          target/release/admin /out/
 
 FROM debian:bookworm-slim AS runtime
 
@@ -20,9 +29,10 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=builder /app/target/release/api /usr/local/bin/api
-COPY --from=builder /app/target/release/worker /usr/local/bin/worker
-COPY --from=builder /app/target/release/migrator /usr/local/bin/migrator
+COPY --from=builder /out/api /usr/local/bin/api
+COPY --from=builder /out/worker /usr/local/bin/worker
+COPY --from=builder /out/migrator /usr/local/bin/migrator
+COPY --from=builder /out/admin /usr/local/bin/admin
 COPY default.toml ./default.toml
 COPY config ./config
 

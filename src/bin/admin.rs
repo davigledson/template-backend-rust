@@ -262,7 +262,9 @@ async fn outbox(
 }
 
 fn read_password(confirmation: bool) -> Result<String, Box<dyn std::error::Error>> {
-    if let Ok(password) = std::env::var("ADMIN_PASSWORD") {
+    if let Ok(password) = std::env::var("ADMIN_PASSWORD")
+        && !password.is_empty()
+    {
         return Ok(password);
     }
 

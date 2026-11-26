@@ -35,12 +35,16 @@ jobs:
           file: docker/Dockerfile
           push: false
           tags: template-backend-rust:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   compose:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
       COMPOSE: docker compose --project-directory . -f docker/compose.deploy.yml
+      POSTGRES_PASSWORD: "ci-app-password"
+      APP__DATABASE__URL: "postgres://app:ci-app-password@postgres:5432/app"
       APP__JWT__SECRET: "ci-compose-secret-com-mais-de-32-caracteres"
     steps:
       - uses: actions/checkout@v7

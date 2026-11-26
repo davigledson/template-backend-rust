@@ -12,9 +12,9 @@ services:
     mem_limit: 768m
     cpus: 1.0
     environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
-      POSTGRES_DB: app
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-app}
       POSTGRES_INITDB_ARGS: "--data-checksums"
     command:
       - postgres
@@ -33,7 +33,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -72,8 +72,8 @@ services:
     cpus: 0.9
     environment:
       APP_PROFILE: production
-      APP__DATABASE__URL: postgres://app:app@postgres:5432/app
-      APP__REDIS__URL: redis://redis:6379
+      APP__DATABASE__URL: ${APP__DATABASE__URL:?defina APP__DATABASE__URL}
+      APP__REDIS__URL: ${APP__REDIS__URL:-redis://redis:6379}
       APP__JWT__SECRET: ${APP__JWT__SECRET:-}
       APP__MAIL__PROVIDER: ${APP__MAIL__PROVIDER:-log}
       APP__MAIL__FROM: ${APP__MAIL__FROM:-nao-responda@example.com}
@@ -88,6 +88,7 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 30s
 
   worker:
     profiles: ["app"]
@@ -99,8 +100,8 @@ services:
     cpus: 0.5
     environment:
       APP_PROFILE: production
-      APP__DATABASE__URL: postgres://app:app@postgres:5432/app
-      APP__REDIS__URL: redis://redis:6379
+      APP__DATABASE__URL: ${APP__DATABASE__URL:?defina APP__DATABASE__URL}
+      APP__REDIS__URL: ${APP__REDIS__URL:-redis://redis:6379}
       APP__JWT__SECRET: ${APP__JWT__SECRET:-}
       APP__MAIL__PROVIDER: ${APP__MAIL__PROVIDER:-log}
       APP__MAIL__FROM: ${APP__MAIL__FROM:-nao-responda@example.com}
@@ -111,6 +112,7 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    stop_grace_period: 1m
 
   # Migrations são explícitas: --profile tools run --rm migrate
   migrate:
@@ -123,11 +125,33 @@ services:
     cpus: 0.5
     environment:
       APP_PROFILE: production
-      APP__DATABASE__URL: postgres://app:app@postgres:5432/app
-      APP__REDIS__URL: redis://redis:6379
+      APP__DATABASE__URL: ${APP__DATABASE__URL:?defina APP__DATABASE__URL}
+      APP__REDIS__URL: ${APP__REDIS__URL:-redis://redis:6379}
       APP__JWT__SECRET: ${APP__JWT__SECRET:-}
     depends_on:
       postgres:
+        condition: service_healthy
+    restart: "no"
+
+  # Bootstrap/manutenção: --profile tools run --rm admin create --email ...
+  admin:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    entrypoint: ["admin"]
+    mem_limit: 384m
+    cpus: 0.5
+    environment:
+      APP_PROFILE: production
+      APP__DATABASE__URL: ${APP__DATABASE__URL:?defina APP__DATABASE__URL}
+      APP__REDIS__URL: ${APP__REDIS__URL:-redis://redis:6379}
+      # Só para bootstrap não interativo; fica no ambiente do container.
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: "no"
 
