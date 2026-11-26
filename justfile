@@ -73,6 +73,10 @@ migrate:
 migration name:
     PATH="$HOME/.cargo/bin:$PATH" sea-orm-cli migrate generate {{name}} -d src/migrations
 
+# Gera o esqueleto de um módulo (rota 501, router e OpenAPI).
+module *args:
+    ./scripts/new-module.sh {{args}}
+
 # Cria um administrador (o primeiro do banco, ou outro com --force).
 admin-create email name force="false":
     cargo run --quiet --bin admin -- create --email {{email}} --name "{{name}}" {{ if force == "true" { "--force" } else { "" } }}
