@@ -49,6 +49,13 @@ pub use server::ServerSettings;
 
 const DEFAULT_PROFILE: &str = "development";
 
+fn valid_profile_name(profile: &str) -> bool {
+    !profile.is_empty()
+        && profile
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+}
+
 #[derive(Debug, Error)]
 pub enum SettingsError {
     #[error("falha ao carregar a configuração: {0}")]
@@ -99,13 +106,25 @@ impl Settings {
     pub fn load_unvalidated() -> Result<Self, SettingsError> {
         let profile = std::env::var("APP_PROFILE").unwrap_or_else(|_| DEFAULT_PROFILE.to_owned());
 
+        if !valid_profile_name(&profile) {
+            return Err(SettingsError::Invalid(format!(
+                "APP_PROFILE inválido: {profile}; use letras, números, '-' ou '_'"
+            )));
+        }
+
+        let profile_file = format!("config/{profile}.toml");
+        if profile != DEFAULT_PROFILE && !Path::new(&profile_file).exists() {
+            return Err(SettingsError::Invalid(format!(
+                "perfil desconhecido: {profile}; crie {profile_file} ou use {DEFAULT_PROFILE}"
+            )));
+        }
+
         if profile == DEFAULT_PROFILE {
             let _ = dotenvy::dotenv();
         }
 
         let mut figment = Figment::new().merge(Toml::file("default.toml"));
 
-        let profile_file = format!("config/{profile}.toml");
         if Path::new(&profile_file).exists() {
             figment = figment.merge(Toml::file(profile_file));
         }
@@ -134,6 +153,7 @@ impl Settings {
         self.jobs.collect_errors(&mut problems);
         self.log.collect_errors(&mut problems);
         self.metrics.collect_errors(&mut problems);
+        self.cors.collect_errors(&mut problems);
 
         // Sem SMTP o código de confirmação só existe no outbox: ligar a
         // exigência de e-mail confirmado tornaria o login impossível.
@@ -194,6 +214,16 @@ mod tests {
         let error = settings.validate().unwrap_err().to_string();
         assert!(error.contains("jwt.secret"), "{error}");
         assert!(error.contains("jobs.timezone"), "{error}");
+    }
+
+    #[test]
+    fn perfil_aceita_apenas_nome_seguro() {
+        assert!(valid_profile_name("development"));
+        assert!(valid_profile_name("production"));
+        assert!(valid_profile_name("staging-1"));
+        assert!(!valid_profile_name(""));
+        assert!(!valid_profile_name("../production"));
+        assert!(!valid_profile_name("producao/../etc"));
     }
 
     #[test]
