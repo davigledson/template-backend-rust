@@ -11,9 +11,12 @@ use crate::{
         openapi::Problem,
         state::AppState,
     },
-    modules::audit::{
-        dto::{AuditOut, AuditPage, ListAuditQuery},
-        service,
+    modules::{
+        audit::{
+            dto::{AuditOut, AuditPage, ListAuditQuery},
+            service,
+        },
+        users::service as users_service,
     },
 };
 
@@ -26,8 +29,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     path = "/audit",
     tag = "audit",
     summary = "Lista ações privilegiadas",
-    description = "Requer `audit:read`. Somente leitura, da mais recente para a mais antiga. \
-                   A consulta usa o token; não confere `token_version` no banco.",
+    description = "Requer `audit:read` e sessão válida no banco (ativo, `token_version` e papel). \
+                   Somente leitura, da mais recente para a mais antiga.",
     params(ListAuditQuery),
     security(("bearer" = [])),
     responses(
@@ -44,6 +47,9 @@ async fn list(
     ValidatedQuery(query): ValidatedQuery<ListAuditQuery>,
 ) -> Result<Json<AuditPage>, AppError> {
     auth.require(AUDIT_READ)?;
+    // A escrita em `audit_log` é feita pelos outros módulos; a leitura confere
+    // a sessão no banco para um token rebaixado/desativado não ver o histórico.
+    users_service::require_session(&state.db, &auth).await?;
 
     let (models, total) = service::list(&state.db, &query).await?;
     let items = models

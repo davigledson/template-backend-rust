@@ -20,7 +20,7 @@ expression: value
           "audit"
         ],
         "summary": "Lista ações privilegiadas",
-        "description": "Requer `audit:read`. Somente leitura, da mais recente para a mais antiga. A consulta usa o token; não confere `token_version` no banco.",
+        "description": "Requer `audit:read` e sessão válida no banco (ativo, `token_version` e papel). Somente leitura, da mais recente para a mais antiga.",
         "operationId": "list",
         "parameters": [
           {

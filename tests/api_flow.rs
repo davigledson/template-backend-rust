@@ -553,6 +553,15 @@ async fn fluxo_de_api() {
         .await;
     forbidden_audit.assert_status(StatusCode::FORBIDDEN);
 
+    // O token antigo da Ana ainda é um JWT válido e diz "admin", mas a sessão
+    // foi rebaixada e a senha redefinida (token_version mudou): a rota confere
+    // o banco, não só o token.
+    let revoked_audit = server
+        .get("/api/v1/audit")
+        .add_header("authorization", bearer(&ana_admin))
+        .await;
+    revoked_audit.assert_status(StatusCode::UNAUTHORIZED);
+
     // --- documentação ---
     let spec: Value = server.get("/api-docs/openapi.json").await.json();
     assert!(spec["paths"]["/api/v1/users"].is_object());
