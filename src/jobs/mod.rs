@@ -17,7 +17,10 @@ const CLEANUP_SCHEDULE: &str = "0 0 3 * * *";
 
 pub async fn run(settings: Settings) -> Result<(), AppError> {
     if !settings.jobs.enabled {
-        tracing::info!("jobs desabilitados (jobs.enabled = false)");
+        // Sair com sucesso faria o `restart: unless-stopped` do Compose
+        // reiniciar o container em loop. Fica vivo até o encerramento.
+        tracing::info!("jobs desabilitados (jobs.enabled = false); aguardando encerramento");
+        shutdown::signal().await;
         return Ok(());
     }
 
