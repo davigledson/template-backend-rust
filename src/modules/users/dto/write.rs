@@ -31,6 +31,9 @@ pub struct UpdateUserRequest {
     pub email: Option<String>,
     pub role: Option<Role>,
     pub active: Option<bool>,
+    /// Versão recebida em `GET /users/{id}`. Se enviada e já tiver mudado,
+    /// devolve `409`.
+    pub version: Option<i32>,
 }
 
 /// Troca de senha feita por administrador.

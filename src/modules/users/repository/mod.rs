@@ -8,5 +8,6 @@ mod write;
 
 pub use read::{
     count_active_admins, count_by_email, find_by_email, find_by_id, list, list_unverified,
+    lock_admin_changes,
 };
 pub use write::{insert, set_email_verified, set_password, set_role, update};

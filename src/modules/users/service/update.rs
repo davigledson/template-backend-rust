@@ -25,6 +25,9 @@ pub struct UserUpdate {
     pub email: Option<String>,
     pub role: Option<Role>,
     pub active: Option<bool>,
+    /// Versão esperada para concorrência otimista. Ausente = versão lida na
+    /// transação.
+    pub version: Option<i32>,
 }
 
 impl UserUpdate {
@@ -49,10 +52,17 @@ pub async fn update(
     }
 
     let txn = db.begin().await?;
+    repository::lock_admin_changes(&txn).await?;
     let current = repository::find_by_id(&txn, target_id)
         .await?
         .ok_or_else(|| AppError::NotFound("usuário não encontrado".to_owned()))?;
 
+    let expected_version = input.version.unwrap_or(current.version);
+    if expected_version != current.version {
+        return Err(AppError::Conflict(
+            "usuário foi alterado por outra pessoa; recarregue e tente novamente".to_owned(),
+        ));
+    }
     let current_role = parse_role(&current.role)?;
     let new_role = input.role.unwrap_or(current_role);
     let new_active = input.active.unwrap_or(current.active);
@@ -110,6 +120,13 @@ pub async fn update(
         new_active,
     );
 
+    let Some(changes) = changes else {
+        // PATCH sem mudança efetiva não deve incrementar `version` nem criar
+        // ruído na auditoria.
+        txn.rollback().await?;
+        return Ok(current);
+    };
+
     let bump_token_version = new_role != current_role || new_active != current.active;
     let email_changed = new_email
         .as_deref()
@@ -118,7 +135,7 @@ pub async fn update(
     let updated = match repository::update(
         &txn,
         target_id,
-        current.version,
+        expected_version,
         new_name,
         new_email,
         (new_role != current_role).then_some(new_role),
@@ -149,9 +166,7 @@ pub async fn update(
         Action::UserUpdated
     };
 
-    if let Some(changes) = changes
-        && let Err(error) = record_user(&txn, actor, action, target_id, Some(changes)).await
-    {
+    if let Err(error) = record_user(&txn, actor, action, target_id, Some(changes)).await {
         txn.rollback().await?;
         return Err(error);
     }
@@ -177,6 +192,7 @@ pub async fn deactivate(
     target_id: Uuid,
 ) -> Result<(), AppError> {
     let txn = db.begin().await?;
+    repository::lock_admin_changes(&txn).await?;
     let current = repository::find_by_id(&txn, target_id)
         .await?
         .ok_or_else(|| AppError::NotFound("usuário não encontrado".to_owned()))?;
@@ -246,6 +262,7 @@ pub async fn set_role(
     role: Role,
 ) -> Result<(), AppError> {
     let txn = db.begin().await?;
+    repository::lock_admin_changes(&txn).await?;
     let current = repository::find_by_id(&txn, id)
         .await?
         .ok_or_else(|| AppError::NotFound("usuário não encontrado".to_owned()))?;

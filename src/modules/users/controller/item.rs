@@ -95,6 +95,7 @@ pub(super) async fn update(
             email: body.email,
             role: body.role,
             active: body.active,
+            version: body.version,
         },
     )
     .await?;

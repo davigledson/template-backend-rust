@@ -2,7 +2,7 @@
 
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DbErr, EntityTrait,
-    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, sea_query::Expr,
+    PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Statement, sea_query::Expr,
 };
 use uuid::Uuid;
 
@@ -32,6 +32,26 @@ pub async fn list_unverified(db: &DatabaseConnection) -> Result<Vec<users::Model
         .order_by_asc(Column::CreatedAt)
         .all(db)
         .await
+}
+
+/// Serializa mudanças que podem afetar o conjunto de admins ativos.
+///
+/// O `version` otimista protege a linha; este lock protege o invariante
+/// "sempre existe ao menos um admin ativo" entre transações concorrentes.
+pub async fn lock_admin_changes<C>(db: &C) -> Result<(), DbErr>
+where
+    C: ConnectionTrait,
+{
+    // Chave fixa do template; qualquer transação que mexa em admin usa a mesma.
+    const LOCK_ID: i64 = 7_301_947_215;
+
+    db.query_one_raw(Statement::from_string(
+        db.get_database_backend(),
+        format!("SELECT pg_advisory_xact_lock({LOCK_ID})"),
+    ))
+    .await?;
+
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

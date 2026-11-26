@@ -218,6 +218,31 @@ async fn fluxo_de_api() {
     assert_eq!(promoted["name"], "Ana Silva");
     assert_eq!(promoted["role"], "admin");
 
+    // --- `version` do cliente detecta edição concorrente ---
+    let stale_version = created["version"].as_i64().expect("version inicial");
+    let stale_patch = server
+        .patch(&format!("/api/v1/users/{ana_id}"))
+        .add_header("authorization", bearer(&admin))
+        .json(&json!({
+            "name": "Ana Versão Antiga",
+            "version": stale_version
+        }))
+        .await;
+    stale_patch.assert_status(StatusCode::CONFLICT);
+
+    // --- PATCH sem mudança efetiva não incrementa a versão ---
+    let current_version = promoted["version"].as_i64().expect("version atual");
+    let noop_patch: Value = server
+        .patch(&format!("/api/v1/users/{ana_id}"))
+        .add_header("authorization", bearer(&admin))
+        .json(&json!({
+            "name": "Ana Silva",
+            "version": current_version
+        }))
+        .await
+        .json();
+    assert_eq!(noop_patch["version"], current_version);
+
     let stale = server
         .get("/api/v1/auth/me")
         .add_header("authorization", bearer(&ana))
