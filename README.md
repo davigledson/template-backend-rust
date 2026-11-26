@@ -1,28 +1,25 @@
 # Template Backend Rust
 
-**Davi Gledson da Silva Benedito**
+Desenvolvido por **Davi Gledson da Silva Benedito** para projetos que precisam
+de alto desempenho, baixo consumo de memória e uma base segura para autenticação,
+usuários e e-mail transacional.
 
-Template de backend em **Rust** para projetos que precisam de alto desempenho,
-baixo consumo de memória e uma base segura para autenticação, usuários e e-mail
-transacional.
-
-Stack: **Axum + SeaORM + PostgreSQL + Redis**, JWT próprio, OpenAPI, outbox de
+Stack: **Axum + SeaORM + PostgreSQL + Redis**, JWT HS256, OpenAPI, outbox de
 e-mail, cron em worker separado e configuração em camadas.
 
-Arquitetura: **monólito modular por feature** — uma API (`/api/v1`) + um worker,
-cada módulo dono das suas rotas, regras e tabelas, com um `core` fino de
-infraestrutura.
+Organização: **monólito modular por feature** — uma API (`/api/v1`) + um worker,
+com rotas, regras e tabelas no módulo dono de cada domínio.
 
 > **Vai mexer no código (pessoa ou agente)?** Leia o [`AGENTS.md`](AGENTS.md):
-> regras duras, comandos e checklists. O "porquê" fica em [`docs/`](docs/):
-> [arquitetura](docs/architecture.md) ·
+> regras, comandos e checklists.
+>
+> **Vai publicar?** O passo a passo de produção está em [`deploy.md`](deploy.md).
+>
+> Guias: [arquitetura](docs/architecture.md) ·
 > [adicionar módulo](docs/adding-a-module.md) ·
 > [segurança](docs/security.md) ·
 > [testes](docs/testing.md) ·
-> [operação](docs/operations.md) · [capacidade](docs/capacity.md) ·
-> [decisões](docs/decisions.md).
->
-> **Vai publicar?** O passo a passo de produção está em [`deploy.md`](deploy.md).
+> [operação](docs/operations.md) · [capacidade](docs/capacity.md).
 
 ## O que vem pronto
 
@@ -37,11 +34,11 @@ infraestrutura.
   RFC 9457 e cabeçalhos de segurança.
 - **Operação:** health checks, métricas Prometheus, OpenAPI, worker de cron e
   CLI de manutenção.
-- **Qualidade:** 106 testes, snapshot de contrato, CI e hooks locais.
+- **Qualidade:** testes unitários e de integração, snapshot de contrato, CI e
+  hooks locais.
 
-O escopo é **auth + users + e-mail + auditoria**. Não existe CRUD genérico,
-Keycloak nem cache de leitura sem medição (decisão registrada em
-[`docs/decisions.md`](docs/decisions.md)).
+Para adicionar outro domínio, crie um módulo seguindo
+[`docs/adding-a-module.md`](docs/adding-a-module.md).
 
 ## Pré-requisitos (máquina do dev)
 
@@ -70,8 +67,7 @@ just admin-create admin@empresa.com "Admin"   # primeiro admin
 just dev                      # API em http://localhost:8080
 ```
 
-O primeiro admin é criado por CLI, nunca por rota pública nem por seed com
-senha no repositório. Em automação, use:
+Crie o primeiro admin pelo CLI. Em automação, use:
 
 ```bash
 ADMIN_PASSWORD='uma-senha-bem-longa-123' just admin-create admin@empresa.com "Admin"
@@ -104,8 +100,7 @@ Regras práticas:
 - **Nunca faça bootstrap de admin por rota pública.** Use o CLI.
 - **Nunca rode migration no boot da API.** O deploy aplica antes de subir.
 - **Nunca coloque segredo em TOML.** Use ambiente/secret manager.
-- **Não crie cache antes de medir.** O Redis já é usado onde há necessidade
-  real: sessão, rate limit, idempotência e códigos opacos.
+- **Use o Redis para** sessão, rate limit, idempotência e códigos opacos.
 
 ## Comandos
 
@@ -274,24 +269,20 @@ Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
 | `DELETE /api/v1/auth/sessions/{familyId}` | encerra outra sessão (204) |
 
 - Senha: **Argon2id**, mínimo de 12 caracteres.
-- Access token: JWT HS256 com `sub`, `role`, `token_version`, `fid` (sessão),
-  `jti`, `iat`, `exp`, `iss`, `aud`.
-- Refresh token: opaco, guardado **hasheado** no Redis, consumo atômico e ligado
-  a uma família. Reuso de token consumido revoga todos os tokens da família.
-- `token_version` sobe ao trocar senha/papel ou desativar: invalida refresh
-  tokens e sessões sensíveis na hora.
-- Recuperação de senha: código opaco de 30 min, hash no Redis, uso único e
-  amarrado ao `token_version` e ao e-mail. O pedido devolve 204 mesmo para
-  e-mail inexistente.
-- Confirmação de e-mail: código de 7 dias, uso único, amarrado ao
-  `token_version` e ao fingerprint do e-mail. Trocar o e-mail zera a
-  confirmação e invalida o código anterior. O reenvio é público (sempre 204) e
+- Access token: JWT HS256 de 15 min; o refresh rotaciona o par.
+- Refresh token: opaco, uso único e ligado a uma família. Reutilizar um token
+  consumido revoga a família inteira.
+- Trocar senha, papel ou desativar o usuário invalida tokens e sessões na hora.
+- Recuperação de senha: código de 30 min, uso único e amarrado ao e-mail. O
+  pedido devolve 204 mesmo para e-mail inexistente.
+- Confirmação de e-mail: código de 7 dias, uso único e amarrado ao e-mail.
+  Trocar o e-mail invalida o código anterior; o reenvio é público (sempre 204) e
   limitado por conta/IP.
-- Sessões: cada login é uma família de refresh com IP e User-Agent no Redis.
+- Sessões: cada login é uma sessão com IP e User-Agent no Redis.
   `GET /auth/sessions` lista e `DELETE` revoga; a sessão atual só sai pelo
-  logout. Se o Redis reinicia, as sessões e os códigos caem junto.
-- A troca da própria senha exige a senha atual, incrementa `token_version` e
-  derruba **todas** as sessões, inclusive a que fez a troca.
+  logout. Se o Redis reinicia, sessões e códigos caem junto.
+- A troca da própria senha exige a senha atual e derruba **todas** as sessões,
+  inclusive a que fez a troca.
 
 | Papel | Permissões |
 |---|---|
@@ -304,9 +295,8 @@ Handlers checam **permissão**, nunca papel:
 auth.require(USERS_WRITE)?;
 ```
 
-O extractor `AuthUser` é stateless; rotas sensíveis chamam
-`users::service::require_session` para conferir `active`, `token_version` e
-papel no banco.
+Rotas sensíveis conferem a sessão no banco (`require_session`): usuário ativo,
+`token_version` atual e papel válido.
 
 ## Gestão de usuários (admin)
 
@@ -324,7 +314,7 @@ Proteções:
 
 - admin não desativa nem rebaixa a si mesmo;
 - não é possível remover o último admin ativo;
-- mudar papel ou desativar incrementa `token_version` e derruba as sessões;
+- mudar papel ou desativar derruba as sessões;
 - `PATCH` usa `version` para concorrência otimista (409 se alguém alterou antes);
 - `DELETE` repetido devolve `204`.
 
@@ -352,15 +342,11 @@ Como usar:
 - não use em `/api/v1/auth/*`: login/refresh/logout carregam tokens e ficam fora
   do replay.
 
-No template, todo `POST` de recurso sob `/api/v1` exige a chave (até 128
-caracteres ASCII visíveis). A resposta fica 24 h no Redis; repetir a mesma chave
-devolve status, `content-type`, `location`, `etag` e corpo originais. Enquanto a
-primeira execução está em andamento, a repetição recebe `409`. Resposta `5xx` não é
+Todo `POST` de recurso sob `/api/v1` exige a chave (até 128 caracteres ASCII
+visíveis). A resposta fica 24 h no Redis; repetir a mesma chave devolve status,
+`content-type`, `location`, `etag` e corpo originais. Enquanto a primeira
+execução está em andamento, a repetição recebe `409`. Resposta `5xx` não é
 gravada; Redis fora do ar segue sem idempotência (fail-open).
-
-> Hoje o único `POST` de recurso é a criação de usuário, que também tem e-mail
-> único no banco. O `Idempotency-Key` é mais valioso em operações futuras com
-> efeito externo (pagamento, pedido, cobrança) e como padrão de contrato.
 
 ## E-mail transacional (outbox)
 
@@ -379,9 +365,9 @@ worker (a cada 15 s)
   -> sent | pending (retry) | failed
 ```
 
-- **Não perde:** se o processo cair entre commit e envio, a linha continua
-  `pending` e o worker tenta de novo.
-- **Não duplica a linha:** `dedupe_key` é única por evento.
+- **Queda entre commit e envio:** a linha continua `pending` e o worker tenta de
+  novo.
+- **Deduplicação:** `dedupe_key` é única por evento.
 - **Entrega at-least-once:** o envio precisa ser idempotente no provedor.
 - **Retry:** 5 tentativas com backoff exponencial (1, 2, 4, 8, 16 min).
 - **Limpeza:** o corpo é apagado após o envio; a linha `sent` guarda só
@@ -437,23 +423,19 @@ tests/                      # integração com testcontainers
 .github/workflows/production.yml # build e smoke de runtime, manual (tag em produção)
 .github/workflows/smoke.yml # smoke pós-deploy contra BASE_URL
 scripts/                    # hooks locais
-docs/                       # arquitetura, segurança, testes, operação e decisões
+docs/                       # arquitetura, segurança, testes e operação
 deploy.md                   # build, compose, migrations e checklist de produção
 ```
 
-## Padrões do template
+## Convenções da API e do banco
 
 - IDs UUID v7; datas `timestamptz` UTC; dinheiro `numeric` + `rust_decimal`;
 - JSON camelCase; listas `{ items, page, perPage, total }`;
 - erros em `application/problem+json` (RFC 9457);
 - rotas no plural sob `/api/v1`;
-- migrations explícitas (`just migrate`), nunca no boot;
-- um módulo é dono das próprias tabelas; outro módulo chama o **service**, não
-  o SQL;
-- `core` só tem infraestrutura; regra de feature fica no módulo.
+- migrations explícitas (`just migrate`), nunca no boot.
 
 ## Próximos passos
 
 - Para criar um módulo novo, siga [`docs/adding-a-module.md`](docs/adding-a-module.md).
-- Para entender as decisões e trade-offs, leia [`docs/decisions.md`](docs/decisions.md).
 - Para publicar, use [`deploy.md`](deploy.md).
