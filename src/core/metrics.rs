@@ -19,7 +19,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use axum_prometheus::{
-    PrometheusMetricLayer, PrometheusMetricLayerBuilder, metrics,
+    EndpointLabel, PrometheusMetricLayer, PrometheusMetricLayerBuilder, metrics,
     metrics::{counter, gauge},
     metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle},
 };
@@ -54,7 +54,12 @@ pub fn pair() -> (PrometheusMetricLayer<'static>, PrometheusHandle) {
         })
         .clone();
 
-    let layer = PrometheusMetricLayerBuilder::new().build();
+    let layer = PrometheusMetricLayerBuilder::new()
+        // Rotas inexistentes não podem criar uma série por URL aleatória.
+        .with_endpoint_label_type(EndpointLabel::MatchedPathWithFallbackFn(|_| {
+            "unmatched".to_owned()
+        }))
+        .build();
     (layer, handle)
 }
 

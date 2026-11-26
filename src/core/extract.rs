@@ -20,6 +20,16 @@ use crate::core::{error::AppError, http::REQUEST_ID_HEADER};
 /// Usado para correlacionar auditoria com o log, sem depender de span.
 pub struct RequestId(pub Option<String>);
 
+const MAX_REQUEST_ID_LEN: usize = 64;
+
+fn sanitize_request_id(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(MAX_REQUEST_ID_LEN)
+        .collect()
+}
+
 /// `User-Agent` da requisição, limitado a 200 caracteres.
 ///
 /// Só é usado como metadado de sessão; nunca entra em decisão de autorização.
@@ -54,7 +64,8 @@ where
             .headers
             .get(&name)
             .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
+            .map(sanitize_request_id)
+            .filter(|value| !value.is_empty());
 
         Ok(Self(value))
     }
@@ -97,5 +108,17 @@ where
 
         value.validate()?;
         Ok(Self(value))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_id_e_limitado_e_sem_controle() {
+        let value = sanitize_request_id(&format!("{}\n", "a".repeat(100)));
+        assert_eq!(value.chars().count(), MAX_REQUEST_ID_LEN);
+        assert!(!value.contains('\n'));
     }
 }

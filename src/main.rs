@@ -70,7 +70,9 @@ async fn run(settings: Settings) -> Result<(), AppError> {
     let jwt = JwtService::new(&config.jwt)?;
     let mailer = mail::from_settings(&config.mail).map_err(AppError::internal)?;
     let state = AppState::new(db, cache, jwt, mailer, Arc::clone(&config));
-    email_service::spawn_depth_reporter(state.clone());
+    if config.metrics.enabled {
+        email_service::spawn_depth_reporter(state.clone());
+    }
     let router = app::build(state);
 
     let address = format!("{}:{}", config.server.host, config.server.port);
