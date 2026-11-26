@@ -25,6 +25,8 @@ pub enum AppError {
     Conflict(String),
     #[error("{0}")]
     MethodNotAllowed(String),
+    #[error("{0}")]
+    NotImplemented(String),
     #[error("muitas tentativas; tente novamente em {retry_after_secs}s")]
     TooManyRequests { retry_after_secs: u64 },
     #[error("{0}")]
@@ -69,6 +71,7 @@ impl AppError {
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::MethodNotAllowed(_) => StatusCode::METHOD_NOT_ALLOWED,
+            Self::NotImplemented(_) => StatusCode::NOT_IMPLEMENTED,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
@@ -92,6 +95,7 @@ impl IntoResponse for AppError {
             Self::NotFound(detail) => ("Recurso não encontrado", detail.clone()),
             Self::Conflict(detail) => ("Conflito", detail.clone()),
             Self::MethodNotAllowed(detail) => ("Método não permitido", detail.clone()),
+            Self::NotImplemented(detail) => ("Não implementado", detail.clone()),
             Self::TooManyRequests { retry_after_secs } => (
                 "Muitas tentativas",
                 format!("Aguarde {retry_after_secs} segundos antes de tentar novamente."),
@@ -158,6 +162,19 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
         assert_eq!(json["title"], "Recurso não encontrado");
         assert_eq!(json["detail"], "produto inexistente");
+    }
+
+    #[tokio::test]
+    async fn not_implemented_vira_501() {
+        let response = AppError::NotImplemented("módulo notes".to_owned()).into_response();
+
+        assert_eq!(response.status(), StatusCode::NOT_IMPLEMENTED);
+        let body = to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap_or_default();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap_or_default();
+        assert_eq!(json["title"], "Não implementado");
+        assert_eq!(json["detail"], "módulo notes");
     }
 
     #[tokio::test]
