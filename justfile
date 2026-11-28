@@ -168,9 +168,13 @@ deny:
 prod-up:
     {{compose_deploy}} --profile app up -d --build api worker
 
+# Sobe a SPA do front no mesmo servidor (imagem em FRONT_IMAGE).
+prod-front:
+    {{compose_deploy}} --profile front up -d front
+
 # Derruba a stack de deploy.
 prod-down:
-    {{compose_deploy}} --profile app down
+    {{compose_deploy}} --profile app --profile front down
 
 # Aplica as migrations na stack de deploy.
 prod-migrate:
@@ -180,9 +184,9 @@ prod-migrate:
 prod-admin +args:
     {{compose_deploy}} --profile tools run --rm admin {{args}}
 
-# Acompanha os logs da stack de deploy.
+# Acompanha os logs da stack de deploy (API, worker e front).
 prod-logs:
-    {{compose_deploy}} --profile app logs -f --tail=100
+    {{compose_deploy}} --profile app --profile front logs -f --tail=100
 
 # Smoke pós-deploy (health, cabeçalhos, login inválido e /metrics).
 smoke base_url metrics_token="":

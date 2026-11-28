@@ -87,8 +87,16 @@ services:
       APP__MAIL__SMTP_URL: ${APP__MAIL__SMTP_URL:-}
       APP__SERVER__TRUST_PROXY_HEADERS: ${APP__SERVER__TRUST_PROXY_HEADERS:-false}
       APP__METRICS__TOKEN: ${APP__METRICS__TOKEN:-}
+    # Só no loopback: quem expõe a API é o nginx do host (ou o proxy do front),
+    # que também define X-Real-IP. Publicar em 0.0.0.0 furaria o rate limit.
     ports:
-      - "8080:8080"
+      - "127.0.0.1:${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health/ready"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -120,6 +128,19 @@ services:
         condition: service_healthy
     restart: unless-stopped
     stop_grace_period: 1m
+
+  # Front estático (SPA). O CI do repositório do front publica a imagem; em
+  # deploy automático o servidor só faz pull. Para build local, use o override
+  # docker/compose.front-build.yml. Publicado só no loopback: o nginx do host
+  # roteia / (front) e /api/ (api) no mesmo domínio.
+  front:
+    profiles: ["front"]
+    image: ${FRONT_IMAGE:-template-front:local}
+    mem_limit: 64m
+    cpus: 0.1
+    ports:
+      - "127.0.0.1:${FRONT_PORT:-3010}:8080"
+    restart: unless-stopped
 
   # Migrations são explícitas: --profile tools run --rm migrate
   migrate:

@@ -1,0 +1,20 @@
+# Override opcional: builda o front localmente em vez de puxar FRONT_IMAGE.
+#
+# Uso (a partir da raiz do backend, com o repositório do front ao lado):
+#   FRONT_IMAGE=app-front:local \
+#   VITE_API_URL=https://app.exemplo.com/api/v1 \
+#   docker compose --project-directory . -f docker/compose.deploy.yml \
+#     -f docker/compose.front-build.yml --profile front up -d --build front
+#
+# Em produção com deploy automático não use este arquivo: o CI do front publica
+# a imagem e o compose só faz pull. VITE_* é embutida no bundle, então cada
+# ambiente precisa da sua própria imagem.
+services:
+  front:
+    build:
+      context: ${FRONT_CONTEXT:-../react-vite-template}
+      args:
+        VITE_API_URL: ${VITE_API_URL:?defina VITE_API_URL}
+        VITE_AUTH_URL: ${VITE_AUTH_URL:-/api/v1}
+        VITE_API_TIMEOUT: ${VITE_API_TIMEOUT:-10000}
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
