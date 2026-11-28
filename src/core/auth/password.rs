@@ -7,8 +7,19 @@ use argon2::{
     password_hash::{self, phc::PasswordHash},
 };
 use thiserror::Error;
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 pub const MIN_PASSWORD_LEN: usize = 12;
+
+/// Quantos hashes/verificações Argon2id podem rodar ao mesmo tempo.
+///
+/// O `Argon2::default()` usa ~19 MiB por tarefa. Com 2 vCPUs e `mem_limit` de
+/// 384 MiB no API, 2 tarefas (≈38 MiB) deixam margem para o resto do processo;
+/// aumentar só com memória e CPU medidas. Sem este limite, o pool de
+/// `spawn_blocking` pode abrir dezenas de hashes e derrubar o container.
+const MAX_CONCURRENT_PASSWORD_TASKS: usize = 2;
+
+static PASSWORD_TASK_SLOTS: Semaphore = Semaphore::const_new(MAX_CONCURRENT_PASSWORD_TASKS);
 
 /// Hash válido usado para igualar o custo quando o e-mail não existe ou está
 /// inativo, evitando enumeração por tempo de resposta.
@@ -46,15 +57,30 @@ pub fn verify(password: &str, encoded: &str) -> Result<bool, PasswordError> {
     }
 }
 
-/// Igual ao [`hash`], mas fora do thread do runtime Tokio.
+/// Reserva uma vaga antes de acionar o pool de blocking. A vaga é liberada
+/// quando a tarefa termina (inclusive em erro).
+async fn acquire_task_slot() -> Result<SemaphorePermit<'static>, PasswordError> {
+    PASSWORD_TASK_SLOTS
+        .acquire()
+        .await
+        .map_err(|error| PasswordError::Task(error.to_string()))
+}
+
+/// Igual ao [`hash`], mas fora do thread do runtime Tokio e com concorrência
+/// limitada.
 pub async fn hash_async(password: String) -> Result<String, PasswordError> {
+    let _permit = acquire_task_slot().await?;
+
     tokio::task::spawn_blocking(move || hash(&password))
         .await
         .map_err(|error| PasswordError::Task(error.to_string()))?
 }
 
-/// Igual ao [`verify`], mas fora do thread do runtime Tokio.
+/// Igual ao [`verify`], mas fora do thread do runtime Tokio e com concorrência
+/// limitada.
 pub async fn verify_async(password: String, encoded: String) -> Result<bool, PasswordError> {
+    let _permit = acquire_task_slot().await?;
+
     tokio::task::spawn_blocking(move || verify(&password, &encoded))
         .await
         .map_err(|error| PasswordError::Task(error.to_string()))?
@@ -109,6 +135,16 @@ mod tests {
                 .await
                 .expect("verify")
         );
+    }
+
+    #[tokio::test]
+    async fn erro_de_hash_nao_vaza_vaga() {
+        // Se um erro não liberasse o semáforo, a terceira chamada ficaria
+        // bloqueada esperando uma vaga que nunca volta.
+        for _ in 0..(MAX_CONCURRENT_PASSWORD_TASKS * 3) {
+            let result = verify_async("senha".to_owned(), "hash-invalido".to_owned()).await;
+            assert!(result.is_err());
+        }
     }
 
     #[test]

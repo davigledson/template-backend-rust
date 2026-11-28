@@ -27,6 +27,7 @@ Postgres cresce. O `mem_limit` é teto, não reserva.
 | Timeout de request | `[server] request_timeout_secs` | 30 |
 | Limite de body | `[server] body_limit_mb` | 2 em dev, 1 em produção |
 | Pool do Redis | `[redis] pool_size` | 8 |
+| Tarefas de senha simultâneas | `MAX_CONCURRENT_PASSWORD_TASKS` em `core/auth/password.rs` | 2 (≈38 MiB de pico) |
 | Outbox por lote | `BATCH_SIZE` em `email/service.rs` | 20 |
 | Cron do outbox | `jobs/mod.rs` | a cada 15 s |
 
