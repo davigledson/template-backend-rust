@@ -29,7 +29,10 @@ use crate::core::{error::AppError, metrics, state::AppState};
 use key::{fingerprint, requires_key, subject, valid_key};
 use store::{Acquired, StoredResponse, acquire, delete, replayable_headers, save};
 
-const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_BUFFERED_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+/// Respostas acima disso continuam valendo, mas não entram no Redis: o
+/// contrato de idempotência não pode consumir o orçamento de sessões/refresh.
+const MAX_STORED_RESPONSE_BYTES: usize = 256 * 1024;
 
 pub async fn middleware(State(state): State<AppState>, request: Request, next: Next) -> Response {
     if !requires_key(request.method(), request.uri().path()) {
@@ -84,7 +87,7 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
     let (parts, body) = response.into_parts();
     let status = parts.status;
 
-    let body = match to_bytes(body, MAX_RESPONSE_BYTES).await {
+    let body = match to_bytes(body, MAX_BUFFERED_RESPONSE_BYTES).await {
         Ok(body) => body,
         Err(error) => {
             tracing::error!(error = %error, "resposta grande demais para idempotência");
@@ -92,6 +95,15 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
             return internal_response();
         }
     };
+
+    if body.len() > MAX_STORED_RESPONSE_BYTES {
+        tracing::debug!(
+            bytes = body.len(),
+            "resposta grande; idempotência não será armazenada"
+        );
+        delete(cache, &fingerprint).await;
+        return Response::from_parts(parts, Body::from(body));
+    }
 
     if status.is_server_error() {
         delete(cache, &fingerprint).await;
@@ -111,6 +123,7 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
             Err(_) => {
                 tracing::warn!("resposta não textual; não será reaproveitada");
                 delete(cache, &fingerprint).await;
+                return Response::from_parts(parts, Body::from(body));
             }
         }
     }
