@@ -13,22 +13,15 @@ use axum::{
 use serde::de::DeserializeOwned;
 use validator::Validate;
 
-use crate::core::{error::AppError, http::REQUEST_ID_HEADER};
+use crate::core::{
+    error::AppError,
+    http::{REQUEST_ID_HEADER, sanitize_request_id},
+};
 
 /// Cabeçalho `x-request-id` da requisição atual.
 ///
 /// Usado para correlacionar auditoria com o log, sem depender de span.
 pub struct RequestId(pub Option<String>);
-
-const MAX_REQUEST_ID_LEN: usize = 64;
-
-fn sanitize_request_id(value: &str) -> String {
-    value
-        .chars()
-        .filter(|character| !character.is_control())
-        .take(MAX_REQUEST_ID_LEN)
-        .collect()
-}
 
 /// `User-Agent` da requisição, limitado a 200 caracteres.
 ///
@@ -118,7 +111,7 @@ mod tests {
     #[test]
     fn request_id_e_limitado_e_sem_controle() {
         let value = sanitize_request_id(&format!("{}\n", "a".repeat(100)));
-        assert_eq!(value.chars().count(), MAX_REQUEST_ID_LEN);
+        assert_eq!(value.chars().count(), 64);
         assert!(!value.contains('\n'));
     }
 }

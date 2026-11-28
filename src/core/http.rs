@@ -4,6 +4,7 @@ use std::{sync::Arc, time::Duration};
 
 use axum::{
     Router,
+    body::Body,
     extract::{DefaultBodyLimit, Request, State},
     http::{
         HeaderName, HeaderValue, Method, StatusCode,
@@ -22,10 +23,22 @@ use tower_http::{
     timeout::TimeoutLayer,
     trace::TraceLayer,
 };
+use tracing::Span;
 
 use crate::config::settings::Settings;
 
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
+
+const MAX_REQUEST_ID_LEN: usize = 64;
+
+/// Limita o `x-request-id` recebido antes de usá-lo em log ou auditoria.
+pub(crate) fn sanitize_request_id(value: &str) -> String {
+    value
+        .chars()
+        .filter(|character| !character.is_control())
+        .take(MAX_REQUEST_ID_LEN)
+        .collect()
+}
 
 /// Aplica as camadas transversais. A ordem importa: a última camada é a mais externa.
 pub fn apply_layers<S>(router: Router<S>, settings: Arc<Settings>) -> Router<S>
@@ -35,21 +48,70 @@ where
     let security_settings = Arc::clone(&settings);
 
     router
-        .layer(PropagateRequestIdLayer::x_request_id())
+        // Ordem (primeira = mais interna): a última camada é a mais externa.
         .layer(cors_layer(&settings))
         .layer(TimeoutLayer::with_status_code(
             StatusCode::REQUEST_TIMEOUT,
             settings.server.request_timeout(),
         ))
         .layer(CompressionLayer::new())
-        .layer(TraceLayer::new_for_http())
-        .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
         .layer(DefaultBodyLimit::max(settings.server.body_limit_bytes()))
+        // Dentro do trace: panic vira 500 registrado no access log.
         .layer(problemdetails::axum::PanicHandlerBuilder::new().build())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(request_span)
+                .on_response(
+                    |response: &Response<Body>, latency: Duration, span: &Span| {
+                        tracing::info!(
+                            parent: span,
+                            status = response.status().as_u16(),
+                            duration_ms = latency.as_millis() as u64,
+                            "requisição concluída"
+                        );
+                    },
+                )
+                .on_failure(
+                    |classification: tower_http::classify::ServerErrorsFailureClass,
+                     latency: Duration,
+                     span: &Span| {
+                        tracing::error!(
+                            parent: span,
+                            classification = %classification,
+                            duration_ms = latency.as_millis() as u64,
+                            "requisição falhou"
+                        );
+                    },
+                ),
+        )
+        // Fora do trace: o span já nasce com o id e a resposta sempre o recebe.
+        .layer(PropagateRequestIdLayer::x_request_id())
+        .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
         .layer(middleware::from_fn_with_state(
             security_settings,
             security_headers,
         ))
+}
+
+/// Access log: o span carrega `x-request-id`, método e caminho; o evento final
+/// acrescenta status e duração. Cabeçalhos não entram no log (evita
+/// `authorization` e `cookie`), e a query string fica de fora para não vazar
+/// segredo em URL.
+fn request_span<B>(request: &Request<B>) -> Span {
+    let request_id = request
+        .headers()
+        .get(REQUEST_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .map(sanitize_request_id)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned());
+
+    tracing::info_span!(
+        "http.request",
+        request_id = %request_id,
+        method = %request.method(),
+        path = %request.uri().path(),
+    )
 }
 
 /// Cabeçalhos de segurança e `no-store` para a API.
