@@ -92,6 +92,132 @@ com um usuário administrador; a aplicação não faz isso no boot.
 
 Segredos nunca entram no repositório nem em TOML.
 
+## Front no mesmo servidor
+
+O front é uma SPA estática em um container nginx, no mesmo domínio da API. O
+nginx do host termina o TLS e roteia:
+
+```text
+https://app.exemplo.com/
+├── /api/*  → 127.0.0.1:8080  (container api)
+└── /*      → 127.0.0.1:3010  (container front)
+```
+
+Por que este desenho:
+
+- o navegador vê **um origin só**: `SameSite=Strict`, sem CORS e sem preflight;
+- `/api` vai direto para a API, então `X-Real-IP` é o cliente real e o rate
+  limit de login por IP funciona;
+- nenhuma porta fica exposta: `api` e `front` publicam só no loopback;
+- trocar o front não reinicia a API (e vice-versa).
+
+### nginx do host
+
+```nginx
+upstream api_backend { server 127.0.0.1:8080; keepalive 16; }
+upstream front_backend { server 127.0.0.1:3010; keepalive 8; }
+
+server {
+    listen 443 ssl http2;
+    server_name app.exemplo.com;
+
+    # ... certificados do certbot ...
+
+    client_max_body_size 2m;   # a API já limita 1 MB no próprio Axum
+
+    # O JSON da API é comprimido aqui; os assets saem comprimidos do container.
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types application/json application/problem+json;
+
+    location /api/ {
+        proxy_pass http://api_backend;   # sem barra no fim: preserva /api/...
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        # O Origin do browser precisa casar com o Host que a API enxerga.
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        proxy_pass http://front_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Dois detalhes que quebram a sessão se ficarem errados:
+
+- `Host $http_host` nos dois blocos: `/auth/refresh` e `/auth/logout` recusam
+  `Origin` que não case com o host da API. `$host` perde a porta, então em um
+  staging em `http://host:8090` (ou qualquer porta fora da 80/443) a checagem
+  falharia com `403`; `$http_host` preserva exatamente o que o browser usa no
+  `Origin`;
+- `proxy_pass` do `/api/` **sem** barra final: com barra o nginx corta o
+  prefixo e a API recebe `/v1/...`.
+
+Com o nginx na frente, exporte `APP__SERVER__TRUST_PROXY_HEADERS=true`. Ele só é
+seguro porque `api` e `front` publicam em `127.0.0.1`; se a API for exposta
+direto na internet, o cabeçalho passa a ser forjável.
+
+### Perfil `front` no compose de deploy
+
+| Variável | Uso |
+|---|---|
+| `FRONT_IMAGE` | imagem publicada pelo CI do repositório do front; obrigatória em produção |
+| `FRONT_PORT` | porta no loopback do host (padrão `3010`) |
+| `API_PORT` | porta da API no loopback do host (padrão `8080`) |
+| `VITE_API_URL` | URL absoluta embutida no bundle; usada só no build local |
+| `VITE_AUTH_URL` | caminho da auth; padrão `/api/v1` |
+| `FRONT_CONTEXT` | caminho do repositório do front para build local |
+
+Deploy automático, com a imagem vinda de um registry:
+
+```bash
+export FRONT_IMAGE=ghcr.io/org/front:2026-11-28
+just prod-migrate
+
+# Tag nova precisa de pull; `up -d` sozinho não atualiza tag já baixada.
+docker compose --project-directory . --env-file /dev/null \
+  -f docker/compose.deploy.yml --profile front pull
+
+just prod-up      # api + worker
+just prod-front   # front
+```
+
+Build local, sem registry (o repositório do front precisa estar ao lado):
+
+```bash
+FRONT_IMAGE=app-front:local \
+VITE_API_URL=https://app.exemplo.com/api/v1 \
+docker compose --project-directory . --env-file /dev/null \
+  -f docker/compose.deploy.yml -f docker/compose.front-build.yml \
+  --profile front up -d --build front
+```
+
+`VITE_*` é embutida no bundle: cada ambiente precisa da sua imagem. A mesma
+imagem não troca de API por variável de runtime.
+
+Buildar o front no servidor usa cerca de 1 GB de RAM (Node + Vite). Em um host
+de 2 GB, prefira a imagem do registry ou builde fora do horário de pico: o
+Postgres e a API podem ser mortos pelo OOM killer.
+
+Verificação:
+
+```bash
+curl -fsS https://app.exemplo.com/healthz            # front
+curl -fsS https://app.exemplo.com/api/v1/...         # API via proxy
+curl -sSI https://app.exemplo.com/admin | head -5    # deep link com no-cache
+```
+
 ## Compose
 
 O compose local sobe só a infraestrutura:
@@ -108,6 +234,7 @@ O compose de deploy usa os perfis:
 |---|---|---|
 | (nenhum) | `postgres`, `redis` | dependências do deploy |
 | `app` | `api`, `worker` | aplicação |
+| `front` | `front` | SPA estática no mesmo domínio (ver seção acima) |
 | `tools` | `migrate`, `admin` | migrations e bootstrap explícitos |
 
 O worker pode rodar em mais de uma instância: o claim usa
@@ -259,6 +386,9 @@ faça backup antes. Confirme com `/health/ready` e `just smoke`.
 - [ ] `trust_proxy_headers = true` só atrás de proxy confiável.
 - [ ] HTTPS ativo e `security.cookie_secure = true`.
 - [ ] `security.cookie_same_site` coerente com a topologia do front.
+- [ ] `api` e `front` publicados só em `127.0.0.1`; o nginx do host preserva
+      `Host` e define `X-Real-IP`.
+- [ ] `FRONT_IMAGE` com tag imutável e o front servindo o `dist/` novo.
 - [ ] HSTS ligado quando a API é servida por HTTPS.
 - [ ] `audit.retention_days` compatível com a política de compliance.
 - [ ] Backup e restore testados (`docs/operations.md`).

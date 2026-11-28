@@ -11,8 +11,12 @@ mesmo lugar. Tudo abaixo é ponto de partida; ajuste com medição.
 | Redis | 160 MB | `maxmemory 128mb` + overhead |
 | API | 384 MB | Tokio 2 threads, pool 8, payload limitado a 1 MB |
 | Worker | 256 MB | cron curto, sem tráfego HTTP |
+| Front (perfil `front`) | 64 MB | nginx servindo assets estáticos |
 | Migrator | 384 MB | pico de migration; roda e sai |
 | Mailpit (perfil `mail`) | 128 MB | só desenvolvimento |
+
+O build da imagem do front **não** roda no servidor de produção: Node + Vite
+consomem cerca de 1 GB e podem acionar o OOM killer. A imagem vem do CI.
 
 Sobra folga para o kernel e para picos, o que evita OOM matar a API quando o
 Postgres cresce. O `mem_limit` é teto, não reserva.

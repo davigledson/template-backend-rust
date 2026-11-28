@@ -9,7 +9,8 @@ desenvolvimento; o Compose local sobe só a infraestrutura.
 |---|---|
 | `Dockerfile` | imagem de deploy: `api`, `worker`, `migrator` e `admin` |
 | `compose.local.yml` | Postgres + Redis + Mailpit para desenvolvimento |
-| `compose.deploy.yml` | Postgres + Redis + API + worker + migrate/admin para deploy |
+| `compose.deploy.yml` | Postgres + Redis + API + worker + front + migrate/admin para deploy |
+| `compose.front-build.yml` | override opcional para buildar o front localmente |
 | `compose.test.yml` | Postgres/Redis efêmeros para debug manual |
 
 ## Local
@@ -67,6 +68,32 @@ via BuildKit:
 ```bash
 docker build -f docker/Dockerfile -t template-backend-rust:local .
 ```
+
+### Front no mesmo servidor
+
+O perfil `front` sobe a SPA estática no mesmo domínio da API. Em produção a
+imagem vem do CI do repositório do front:
+
+```bash
+export FRONT_IMAGE=ghcr.io/org/front:2026-11-28
+docker compose --project-directory . --env-file /dev/null \
+  -f docker/compose.deploy.yml --profile app --profile front \
+  up -d --remove-orphans
+```
+
+Para buildar localmente, use o override (o repositório do front precisa estar em
+`FRONT_CONTEXT`, padrão `../react-vite-template`):
+
+```bash
+FRONT_IMAGE=app-front:local \
+VITE_API_URL=https://app.exemplo.com/api/v1 \
+docker compose --project-directory . --env-file /dev/null \
+  -f docker/compose.deploy.yml -f docker/compose.front-build.yml \
+  --profile front up -d --build front
+```
+
+`api` e `front` publicam só em `127.0.0.1`. Quem roteia `/` e `/api/` é o nginx
+do host; o server block e os detalhes de cookie estão em `deploy.md`.
 
 ## Testes
 

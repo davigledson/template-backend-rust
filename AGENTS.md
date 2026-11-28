@@ -46,6 +46,7 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just prod-migrate` | aplica migrations na stack de deploy |
 | `just prod-admin <args>` | roda o CLI admin na stack de deploy |
 | `just prod-up` | sobe infra + api + worker de deploy |
+| `just prod-front` | sobe a SPA do front (perfil `front`, imagem em `FRONT_IMAGE`) |
 | `just prod-down` | derruba a stack de deploy |
 | `just prod-logs` | acompanha os logs da stack de deploy |
 | `just smoke <url> [token]` | smoke pós-deploy de uma URL publicada |
