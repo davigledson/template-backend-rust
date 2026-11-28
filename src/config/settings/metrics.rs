@@ -1,8 +1,8 @@
 //! Endpoint `/metrics` (Prometheus).
 //!
-//! O token é opcional: vazio mantém o endpoint público, o que só faz sentido
-//! quando o proxy/rede já restringe o acesso. Fora isso, use um Bearer forte e
-//! mantenha a rota fora da internet.
+//! O token é opcional em desenvolvimento: vazio mantém o endpoint público, o
+//! que só faz sentido quando a proxy/rede já restringe o acesso. Em produção,
+//! com a rota ligada, `Settings::validate` exige o token.
 
 use std::fmt;
 
@@ -15,7 +15,8 @@ pub const MIN_TOKEN_LEN: usize = 16;
 pub struct MetricsSettings {
     /// Monta (ou não) a rota `/metrics`.
     pub enabled: bool,
-    /// Token Bearer opcional; nunca aparece no `Debug`.
+    /// Token Bearer; obrigatório em produção quando a rota está ligada.
+    /// Nunca aparece no `Debug`.
     pub token: String,
 }
 

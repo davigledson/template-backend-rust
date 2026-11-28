@@ -8,7 +8,7 @@ set -euo pipefail
 usage() {
     echo "Uso: just smoke <base_url> [metrics_token]" >&2
     echo "  <base_url>       ex.: https://api.exemplo.com" >&2
-    echo "  [metrics_token]  Bearer opcional do /metrics" >&2
+    echo "  [metrics_token]  Bearer do /metrics (obrigatório em produção)" >&2
 }
 
 if [ "$#" -lt 1 ] || [ -z "$1" ]; then

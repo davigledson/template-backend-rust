@@ -18,7 +18,7 @@ on:
         type: string
     secrets:
       METRICS_TOKEN:
-        description: "Bearer opcional do /metrics"
+        description: "Bearer do /metrics (obrigatório em produção)"
         required: false
 
 permissions:

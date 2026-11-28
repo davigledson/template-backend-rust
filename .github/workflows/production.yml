@@ -46,6 +46,9 @@ jobs:
       POSTGRES_PASSWORD: "ci-app-password"
       APP__DATABASE__URL: "postgres://app:ci-app-password@postgres:5432/app"
       APP__JWT__SECRET: "ci-compose-secret-com-mais-de-32-caracteres"
+      APP__MAIL__PROVIDER: "smtp"
+      APP__MAIL__SMTP_URL: "smtp://127.0.0.1:1025"
+      APP__METRICS__TOKEN: "ci-metrics-token-123456"
     steps:
       - uses: actions/checkout@v7
 
@@ -71,11 +74,11 @@ jobs:
           curl -fsS http://127.0.0.1:8080/health
 
           for _ in $(seq 1 20); do
-            if curl -fsS http://127.0.0.1:8080/metrics | grep -q app_email_outbox_pending; then break; fi
+            if curl -fsS -H "authorization: Bearer $APP__METRICS__TOKEN" http://127.0.0.1:8080/metrics | grep -q app_email_outbox_pending; then break; fi
             sleep 2
           done
 
-          curl -fsS http://127.0.0.1:8080/metrics | grep -E 'axum_http_requests_total|app_email_outbox_pending'
+          curl -fsS -H "authorization: Bearer $APP__METRICS__TOKEN" http://127.0.0.1:8080/metrics | grep -E 'axum_http_requests_total|app_email_outbox_pending'
 
           status=$(curl -sS -o /dev/null -w '%{http_code}' \
             -X POST http://127.0.0.1:8080/api/v1/auth/login \

@@ -155,6 +155,23 @@ impl Settings {
         self.metrics.collect_errors(&mut problems);
         self.cors.collect_errors(&mut problems);
 
+        // Defaults de desenvolvimento não podem vazar para produção sem
+        // revisão: e-mail em `log` descarta recuperação/confirmação de senha e
+        // `/metrics` sem token expõe a telemetria.
+        if self.profile == "production" {
+            if self.mail.provider == "log" {
+                problems.push(
+                    "mail.provider = log não é permitido em produção; configure smtp".to_owned(),
+                );
+            }
+            if self.metrics.enabled && self.metrics.token().is_none() {
+                problems.push(
+                    "metrics.token é obrigatório em produção quando metrics.enabled = true"
+                        .to_owned(),
+                );
+            }
+        }
+
         // Sem SMTP o código de confirmação só existe no outbox: ligar a
         // exigência de e-mail confirmado tornaria o login impossível.
         if self.security.require_email_verified && self.mail.provider != "smtp" {
@@ -237,6 +254,27 @@ mod tests {
 
         settings.mail.provider = "smtp".to_owned();
         settings.mail.smtp_url = "smtp://localhost:1025".to_owned();
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
+    fn producao_recusa_log_e_metrica_sem_token() {
+        let mut settings = valid();
+        settings.profile = "production".to_owned();
+
+        let error = settings.validate().unwrap_err().to_string();
+        assert!(error.contains("mail.provider"), "{error}");
+        assert!(error.contains("metrics.token"), "{error}");
+    }
+
+    #[test]
+    fn producao_aceita_smtp_e_metrica_com_token() {
+        let mut settings = valid();
+        settings.profile = "production".to_owned();
+        settings.mail.provider = "smtp".to_owned();
+        settings.mail.smtp_url = "smtp://localhost:1025".to_owned();
+        settings.metrics.token = "token-de-teste-123456".to_owned();
+
         assert!(settings.validate().is_ok());
     }
 }
