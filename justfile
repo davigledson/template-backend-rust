@@ -48,6 +48,14 @@ reset:
 logs:
     {{compose_local}} logs -f --tail=100
 
+# Cria pg_stat_statements e mostra as consultas mais caras e as em execução.
+db-stats:
+    @set -a; [ -f .env ] && . ./.env; set +a; \
+      psql "${APP__DATABASE__URL:-postgres://app:app@localhost:55432/app}" -v ON_ERROR_STOP=1 \
+        -c "create extension if not exists pg_stat_statements" \
+        -c "select round(total_exec_time::numeric, 1) as total_ms, calls, round(mean_exec_time::numeric, 2) as mean_ms, rows, left(query, 100) as query from pg_stat_statements order by total_exec_time desc limit 15" \
+        -c "select pid, now() - query_start as duration, state, left(query, 100) as query from pg_stat_activity where state <> 'idle' and query_start is not null order by duration desc limit 10"
+
 # Sobe a API com logs legíveis.
 dev:
     cargo run --bin api
@@ -179,6 +187,10 @@ prod-logs:
 # Smoke pós-deploy (health, cabeçalhos, login inválido e /metrics).
 smoke base_url metrics_token="":
     ./scripts/smoke.sh "{{base_url}}" "{{metrics_token}}"
+
+# Mede throughput e latência dos endpoints principais (precisa de oha ou ab).
+bench duration="10s" concurrency="20":
+    ./scripts/bench.sh "{{duration}}" "{{concurrency}}"
 
 # Constrói a imagem de produção.
 docker-build:
