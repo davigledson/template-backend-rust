@@ -1,6 +1,6 @@
 //! Validações puras compartilhadas pelas regras de `users`.
 
-use sea_orm::DbErr;
+use sea_orm::{DbErr, SqlErr};
 use uuid::Uuid;
 
 use crate::core::{auth::role::Role, error::AppError};
@@ -29,9 +29,7 @@ pub fn parse_role(value: &str) -> Result<Role, AppError> {
 }
 
 pub fn is_unique_violation(error: &DbErr) -> bool {
-    error
-        .to_string()
-        .contains("duplicate key value violates unique constraint")
+    matches!(error.sql_err(), Some(SqlErr::UniqueConstraintViolation(_)))
 }
 
 /// O alvo deixa de ser um administrador ativo.
