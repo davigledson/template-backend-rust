@@ -34,13 +34,15 @@ impl Default for CorsSettings {
 
 impl CorsSettings {
     pub(super) fn collect_errors(&self, problems: &mut Vec<String>) {
-        if self.allowed_origins.iter().any(|origin| origin == "*") && self.allowed_origins.len() > 1
-        {
-            problems.push("cors.allowed_origins: use '*' sozinho ou liste origens".to_owned());
+        if self.allowed_origins.iter().any(|origin| origin == "*") {
+            problems.push(
+                "cors.allowed_origins não pode usar '*' com cookie de sessão; liste as origens"
+                    .to_owned(),
+            );
         }
 
         for origin in &self.allowed_origins {
-            if origin != "*" && HeaderValue::from_str(origin).is_err() {
+            if HeaderValue::from_str(origin).is_err() {
                 problems.push(format!("cors.allowed_origins: origem inválida: {origin}"));
             }
         }
@@ -89,5 +91,14 @@ mod tests {
         assert!(message.contains("allowed_origins"), "{message}");
         assert!(message.contains("allowed_methods"), "{message}");
         assert!(message.contains("allowed_headers"), "{message}");
+    }
+
+    #[test]
+    fn rejeita_curinga_porque_a_api_usa_cookie() {
+        let settings = CorsSettings {
+            allowed_origins: vec!["*".to_owned()],
+            ..Default::default()
+        };
+        assert!(errors(&settings).contains("allowed_origins"));
     }
 }

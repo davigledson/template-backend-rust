@@ -69,6 +69,10 @@ ansi = false
 require_email_verified = false
 # HSTS em segundos; 0 desliga. Só faz efeito quando a API é servida por HTTPS.
 hsts_max_age_secs = 0
+# Cookie do refresh: Secure obrigatório em produção (HTTPS).
+cookie_secure = true
+# SameSite do cookie: strict, lax ou none. `none` exige cookie_secure = true.
+cookie_same_site = "strict"
 
 [docs]
 # Expõe /docs e /api-docs/openapi.json. Desligue em produção pública.

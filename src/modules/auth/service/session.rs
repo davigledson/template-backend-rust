@@ -4,17 +4,16 @@ use crate::{
     core::{auth::role::Role, error::AppError, metrics, state::AppState},
     modules::{
         auth::{
-            dto::{RefreshRequest, TokenResponse},
             repository::{self, ConsumeOutcome},
-            service::tokens::issue_tokens,
+            service::tokens::{IssuedTokens, issue_tokens},
         },
         users::service as users_service,
     },
 };
 
-#[tracing::instrument(skip(state, request))]
-pub async fn refresh(state: &AppState, request: RefreshRequest) -> Result<TokenResponse, AppError> {
-    let token = request.refresh_token.trim();
+#[tracing::instrument(skip(state, token))]
+pub async fn refresh(state: &AppState, token: &str) -> Result<IssuedTokens, AppError> {
+    let token = token.trim();
     if token.is_empty() {
         return Err(invalid_refresh());
     }
@@ -57,18 +56,19 @@ pub async fn refresh(state: &AppState, request: RefreshRequest) -> Result<TokenR
     issue_tokens(state, &user, role, ticket.family_id).await
 }
 
-#[tracing::instrument(skip(state, request))]
-pub async fn logout(state: &AppState, request: RefreshRequest) -> Result<(), AppError> {
-    let token = request.refresh_token.trim();
-    if !token.is_empty() {
-        // Lê a família antes de revogar para apagar também os metadados.
-        let ticket = repository::peek(&state.cache, token).await?;
-        repository::revoke(&state.cache, token).await?;
+#[tracing::instrument(skip(state, token))]
+pub async fn logout(state: &AppState, token: Option<&str>) -> Result<(), AppError> {
+    let Some(token) = token.map(str::trim).filter(|token| !token.is_empty()) else {
+        return Ok(());
+    };
 
-        if let Some(ticket) = ticket {
-            repository::remove_session(&state.cache, ticket.user_id, ticket.family_id).await?;
-            metrics::session_revoked();
-        }
+    // Lê a família antes de revogar para apagar também os metadados.
+    let ticket = repository::peek(&state.cache, token).await?;
+    repository::revoke(&state.cache, token).await?;
+
+    if let Some(ticket) = ticket {
+        repository::remove_session(&state.cache, ticket.user_id, ticket.family_id).await?;
+        metrics::session_revoked();
     }
     Ok(())
 }

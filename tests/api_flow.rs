@@ -7,7 +7,9 @@
 mod common;
 
 use axum::http::StatusCode;
-use common::{ADMIN_EMAIL, ADMIN_PASSWORD, Harness, bearer, session};
+use common::{
+    ADMIN_EMAIL, ADMIN_PASSWORD, Harness, bearer, refresh, session, session_from_response,
+};
 use serde_json::{Value, json};
 
 #[tokio::test]
@@ -93,21 +95,21 @@ async fn fluxo_de_api() {
 
     // --- login não passa por idempotência ---
     let login_key = "login-nao-e-cacheado";
-    let first_login = server
-        .post("/api/v1/auth/login")
-        .add_header("idempotency-key", login_key)
-        .json(&json!({ "email": ADMIN_EMAIL, "password": ADMIN_PASSWORD }))
-        .await;
-    first_login.assert_status_ok();
-    let first_login: Value = first_login.json();
+    let first_login = session_from_response(
+        server
+            .post("/api/v1/auth/login")
+            .add_header("idempotency-key", login_key)
+            .json(&json!({ "email": ADMIN_EMAIL, "password": ADMIN_PASSWORD }))
+            .await,
+    );
 
-    let second_login = server
-        .post("/api/v1/auth/login")
-        .add_header("idempotency-key", login_key)
-        .json(&json!({ "email": ADMIN_EMAIL, "password": ADMIN_PASSWORD }))
-        .await;
-    second_login.assert_status_ok();
-    let second_login: Value = second_login.json();
+    let second_login = session_from_response(
+        server
+            .post("/api/v1/auth/login")
+            .add_header("idempotency-key", login_key)
+            .json(&json!({ "email": ADMIN_EMAIL, "password": ADMIN_PASSWORD }))
+            .await,
+    );
     assert_ne!(
         first_login["refreshToken"], second_login["refreshToken"],
         "login repetido precisa gerar uma sessão nova"
@@ -379,10 +381,7 @@ async fn fluxo_de_api() {
         .await;
     stale_after_change.assert_status(StatusCode::UNAUTHORIZED);
 
-    let stale_refresh = server
-        .post("/api/v1/auth/refresh")
-        .json(&json!({ "refreshToken": ana_refresh }))
-        .await;
+    let stale_refresh = refresh(server, &ana_refresh).await;
     stale_refresh.assert_status(StatusCode::UNAUTHORIZED);
 
     let old_password = server
@@ -402,29 +401,18 @@ async fn fluxo_de_api() {
         .to_owned();
 
     // --- rotação e detecção de reuso de refresh token ---
-    let rotated = server
-        .post("/api/v1/auth/refresh")
-        .json(&json!({ "refreshToken": first_refresh }))
-        .await;
-    rotated.assert_status_ok();
-    let rotated: Value = rotated.json();
+    let rotated = session_from_response(refresh(server, &first_refresh).await);
     let second_refresh = rotated["refreshToken"]
         .as_str()
         .expect("refresh rotacionado")
         .to_owned();
     assert_ne!(first_refresh, second_refresh);
 
-    let reuse = server
-        .post("/api/v1/auth/refresh")
-        .json(&json!({ "refreshToken": first_refresh }))
-        .await;
+    let reuse = refresh(server, &first_refresh).await;
     reuse.assert_status(StatusCode::UNAUTHORIZED);
 
     // O reuso revoga a família inteira: o token rotacionado também cai.
-    let family_revoked = server
-        .post("/api/v1/auth/refresh")
-        .json(&json!({ "refreshToken": second_refresh }))
-        .await;
+    let family_revoked = refresh(server, &second_refresh).await;
     family_revoked.assert_status(StatusCode::UNAUTHORIZED);
 
     // O access token segue válido até expirar (JWT stateless).
@@ -440,10 +428,7 @@ async fn fluxo_de_api() {
         .as_str()
         .expect("refresh da outra sessão")
         .to_owned();
-    let other_rotated = server
-        .post("/api/v1/auth/refresh")
-        .json(&json!({ "refreshToken": other_refresh }))
-        .await;
+    let other_rotated = refresh(server, &other_refresh).await;
     other_rotated.assert_status_ok();
 
     // --- rate limit de login ---

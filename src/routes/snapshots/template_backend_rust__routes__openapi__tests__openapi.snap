@@ -261,7 +261,8 @@ expression: value
         "tags": [
           "auth"
         ],
-        "summary": "Autentica e emite os tokens",
+        "summary": "Autentica e emite o access token",
+        "description": "O refresh token vai em cookie HttpOnly; o corpo tem apenas o access token.",
         "operationId": "login",
         "requestBody": {
           "content": {
@@ -275,7 +276,7 @@ expression: value
         },
         "responses": {
           "200": {
-            "description": "Tokens emitidos",
+            "description": "Access token emitido; refresh no cookie",
             "content": {
               "application/json": {
                 "schema": {
@@ -296,6 +297,16 @@ expression: value
           },
           "401": {
             "description": "Credenciais inválidas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Origem não permitida",
             "content": {
               "application/json": {
                 "schema": {
@@ -332,24 +343,15 @@ expression: value
         "tags": [
           "auth"
         ],
-        "summary": "Revoga o refresh token",
+        "summary": "Revoga o refresh token do cookie",
+        "description": "Revoga a sessão do cookie e o remove da resposta.",
         "operationId": "logout",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RefreshRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "204": {
             "description": "Sessão encerrada"
           },
-          "422": {
-            "description": "Validação falhou",
+          "403": {
+            "description": "Origem não permitida",
             "content": {
               "application/json": {
                 "schema": {
@@ -667,22 +669,12 @@ expression: value
         "tags": [
           "auth"
         ],
-        "summary": "Rotaciona o refresh token",
-        "description": "O refresh token usado é revogado; um novo par é emitido.",
+        "summary": "Rotaciona o refresh token do cookie",
+        "description": "O refresh token usado é revogado; um novo par é emitido e o cookie é renovado.",
         "operationId": "refresh",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RefreshRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
-            "description": "Novos tokens",
+            "description": "Novo access token; cookie de refresh rotacionado",
             "content": {
               "application/json": {
                 "schema": {
@@ -701,8 +693,8 @@ expression: value
               }
             }
           },
-          "422": {
-            "description": "Validação falhou",
+          "403": {
+            "description": "Origem não permitida",
             "content": {
               "application/json": {
                 "schema": {
@@ -1546,18 +1538,6 @@ expression: value
           }
         }
       },
-      "RefreshRequest": {
-        "type": "object",
-        "required": [
-          "refreshToken"
-        ],
-        "properties": {
-          "refreshToken": {
-            "type": "string"
-          }
-        },
-        "additionalProperties": false
-      },
       "ResendVerificationRequest": {
         "type": "object",
         "description": "Pedido público de reenvio do código de confirmação.",
@@ -1649,9 +1629,9 @@ expression: value
       },
       "TokenResponse": {
         "type": "object",
+        "description": "Resposta do login e do refresh. O refresh token vai no cookie `HttpOnly`,\nnunca no corpo.",
         "required": [
           "accessToken",
-          "refreshToken",
           "tokenType",
           "expiresIn"
         ],
@@ -1663,9 +1643,6 @@ expression: value
             "type": "integer",
             "format": "int64",
             "description": "Validade do access token em segundos."
-          },
-          "refreshToken": {
-            "type": "string"
           },
           "tokenType": {
             "type": "string"

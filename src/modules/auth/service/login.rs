@@ -13,9 +13,9 @@ use crate::{
     },
     modules::{
         auth::{
-            dto::{LoginRequest, TokenResponse},
+            dto::LoginRequest,
             repository,
-            service::tokens::issue_tokens,
+            service::tokens::{IssuedTokens, issue_tokens},
         },
         users::service as users_service,
     },
@@ -27,7 +27,7 @@ pub async fn login(
     request: LoginRequest,
     client_ip: &str,
     user_agent: Option<&str>,
-) -> Result<TokenResponse, AppError> {
+) -> Result<IssuedTokens, AppError> {
     if request.email.trim().is_empty() || request.password.is_empty() {
         return Err(AppError::BadRequest(
             "e-mail e senha são obrigatórios".to_owned(),

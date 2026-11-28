@@ -19,13 +19,6 @@ pub struct LoginRequest {
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RefreshRequest {
-    #[validate(length(min = 1, max = 512))]
-    pub refresh_token: String,
-}
-
-#[derive(Debug, Deserialize, Validate, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateProfileRequest {
     #[validate(length(min = 1, max = 120))]
     pub name: String,
@@ -40,11 +33,12 @@ pub struct ChangeOwnPasswordRequest {
     pub new_password: String,
 }
 
+/// Resposta do login e do refresh. O refresh token vai no cookie `HttpOnly`,
+/// nunca no corpo.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenResponse {
     pub access_token: String,
-    pub refresh_token: String,
     pub token_type: &'static str,
     /// Validade do access token em segundos.
     pub expires_in: i64,

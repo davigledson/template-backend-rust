@@ -11,12 +11,30 @@ use crate::{
     modules::auth::{dto::TokenResponse, repository},
 };
 
+/// Par emitido internamente: o access vai no corpo, o refresh vai no cookie.
+pub struct IssuedTokens {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub token_type: &'static str,
+    pub expires_in: i64,
+}
+
+impl From<IssuedTokens> for TokenResponse {
+    fn from(tokens: IssuedTokens) -> Self {
+        Self {
+            access_token: tokens.access_token,
+            token_type: tokens.token_type,
+            expires_in: tokens.expires_in,
+        }
+    }
+}
+
 pub(super) async fn issue_tokens(
     state: &AppState,
     user: &users::Model,
     role: Role,
     family_id: Uuid,
-) -> Result<TokenResponse, AppError> {
+) -> Result<IssuedTokens, AppError> {
     let access_token =
         state
             .jwt
@@ -34,7 +52,7 @@ pub(super) async fn issue_tokens(
     )
     .await?;
 
-    Ok(TokenResponse {
+    Ok(IssuedTokens {
         access_token,
         refresh_token,
         token_type: "Bearer",

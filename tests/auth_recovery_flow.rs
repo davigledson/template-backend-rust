@@ -14,7 +14,10 @@ use template_backend_rust::{
     },
 };
 
-use common::{ADMIN_EMAIL, Harness, bearer, session};
+use common::{
+    ADMIN_EMAIL, Harness, bearer, logout, refresh as refresh_session, session,
+    session_from_response,
+};
 
 #[tokio::test]
 async fn recuperacao_de_senha_por_email() {
@@ -168,12 +171,7 @@ async fn sessoes_por_dispositivo_listam_e_encerram() {
     let created_at = current["createdAt"].as_str().expect("createdAt").to_owned();
 
     // O refresh renova o par sem resetar a data de criação da sessão.
-    let rotated: Value = app
-        .server
-        .post("/api/v1/auth/refresh")
-        .json(&json!({ "refreshToken": refresh }))
-        .await
-        .json();
+    let rotated = session_from_response(refresh_session(&app.server, refresh).await);
     let access = rotated["accessToken"].as_str().expect("access");
     let refresh = rotated["refreshToken"].as_str().expect("refresh");
 
@@ -211,11 +209,12 @@ async fn sessoes_por_dispositivo_listam_e_encerram() {
         .assert_status_no_content();
 
     // O refresh da sessão encerrada não vale mais.
-    app.server
-        .post("/api/v1/auth/refresh")
-        .json(&json!({ "refreshToken": first["refreshToken"].as_str().expect("refresh") }))
-        .await
-        .assert_status_unauthorized();
+    refresh_session(
+        &app.server,
+        first["refreshToken"].as_str().expect("refresh"),
+    )
+    .await
+    .assert_status_unauthorized();
 
     // Repetir o encerramento devolve 404.
     app.server
@@ -228,9 +227,7 @@ async fn sessoes_por_dispositivo_listam_e_encerram() {
         .assert_status_not_found();
 
     // Logout some com a sessão da lista.
-    app.server
-        .post("/api/v1/auth/logout")
-        .json(&json!({ "refreshToken": refresh }))
+    logout(&app.server, refresh)
         .await
         .assert_status_no_content();
 

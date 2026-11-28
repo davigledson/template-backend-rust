@@ -18,7 +18,7 @@ use axum::{
 };
 use tower_http::{
     compression::CompressionLayer,
-    cors::{AllowOrigin, Any, CorsLayer},
+    cors::{AllowOrigin, CorsLayer},
     request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer},
     timeout::TimeoutLayer,
     trace::TraceLayer,
@@ -169,16 +169,10 @@ fn cors_layer(settings: &Settings) -> CorsLayer {
     let layer = CorsLayer::new()
         .allow_methods(methods)
         .allow_headers(headers)
+        // O refresh vem em cookie; o navegador só envia com credenciais.
+        // `*` é recusado na validação da configuração.
+        .allow_credentials(true)
         .max_age(Duration::from_secs(settings.cors.max_age_secs));
-
-    if settings
-        .cors
-        .allowed_origins
-        .iter()
-        .any(|origin| origin == "*")
-    {
-        return layer.allow_origin(Any);
-    }
 
     let origins: Vec<HeaderValue> = settings
         .cors

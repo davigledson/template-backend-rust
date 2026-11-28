@@ -14,7 +14,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use axum_test::TestServer;
+use axum::http::header::SET_COOKIE;
+use axum_test::{TestResponse, TestServer};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, Database, DatabaseConnection, EntityTrait, PaginatorTrait,
     QueryFilter, QueryOrder,
@@ -325,14 +326,60 @@ fn redis_with_database(url: &str, index: i64) -> String {
     }
 }
 
-/// Login completo, devolvendo `accessToken` e `refreshToken`.
+/// Login completo, devolvendo `accessToken` e o refresh lido do cookie.
+///
+/// O corpo real só tem o access token; o `refreshToken` injetado aqui simula o
+/// que o navegador guardaria no cookie `HttpOnly` para os testes.
 pub async fn session(server: &TestServer, email: &str, password: &str) -> Value {
     let response = server
         .post("/api/v1/auth/login")
         .json(&json!({ "email": email, "password": password }))
         .await;
+
+    session_from_response(response)
+}
+
+pub fn session_from_response(response: TestResponse) -> Value {
     response.assert_status_ok();
-    response.json()
+    let refresh_token = refresh_token_from(&response);
+    let mut body: Value = response.json();
+    body["refreshToken"] = Value::String(refresh_token);
+    body
+}
+
+/// Valor do cookie de refresh devolvido em `Set-Cookie`.
+pub fn refresh_token_from(response: &TestResponse) -> String {
+    response
+        .headers()
+        .get_all(SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find_map(|value| {
+            let pair = value.split(';').next().unwrap_or(value);
+            pair.strip_prefix("refresh_token=").map(str::to_owned)
+        })
+        .filter(|value| !value.is_empty())
+        .expect("Set-Cookie de refresh")
+}
+
+pub fn refresh_cookie(token: &str) -> String {
+    format!("refresh_token={token}")
+}
+
+/// Refresh usando o cookie, como o navegador faria.
+pub async fn refresh(server: &TestServer, token: &str) -> TestResponse {
+    server
+        .post("/api/v1/auth/refresh")
+        .add_header("cookie", refresh_cookie(token))
+        .await
+}
+
+/// Logout usando o cookie.
+pub async fn logout(server: &TestServer, token: &str) -> TestResponse {
+    server
+        .post("/api/v1/auth/logout")
+        .add_header("cookie", refresh_cookie(token))
+        .await
 }
 
 pub fn bearer(token: &str) -> String {

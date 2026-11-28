@@ -30,6 +30,7 @@ tower-http = { version = "0.7.1", features = [
     "timeout",
     "trace",
 ] }
+axum-extra = { version = "0.12.6", features = ["cookie"] }
 
 # --- serialização / validação ---
 serde = { version = "1.0.229", features = ["derive"] }

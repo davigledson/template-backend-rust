@@ -154,6 +154,7 @@ impl Settings {
         self.log.collect_errors(&mut problems);
         self.metrics.collect_errors(&mut problems);
         self.cors.collect_errors(&mut problems);
+        self.security.collect_errors(&mut problems);
 
         // Defaults de desenvolvimento não podem vazar para produção sem
         // revisão: e-mail em `log` descarta recuperação/confirmação de senha e
@@ -170,12 +171,24 @@ impl Settings {
                         .to_owned(),
                 );
             }
+            if !self.security.cookie_secure {
+                problems
+                    .push("security.cookie_secure precisa ser true em produção (HTTPS)".to_owned());
+            }
         }
 
         // Sem SMTP o código de confirmação só existe no outbox: ligar a
         // exigência de e-mail confirmado tornaria o login impossível.
         if self.security.require_email_verified && self.mail.provider != "smtp" {
             problems.push("security.require_email_verified exige mail.provider = smtp".to_owned());
+        }
+
+        // SameSite=None é para front em outro site; sem origem explícita não há
+        // CORS com credenciais nem checagem de Origin.
+        if self.security.cookie_same_site == "none" && self.cors.allowed_origins.is_empty() {
+            problems.push(
+                "security.cookie_same_site = none exige cors.allowed_origins explícito".to_owned(),
+            );
         }
 
         if problems.is_empty() {
@@ -258,13 +271,28 @@ mod tests {
     }
 
     #[test]
+    fn same_site_none_exige_origem_explicita() {
+        let mut settings = valid();
+        settings.security.cookie_same_site = "none".to_owned();
+        settings.cors.allowed_origins = Vec::new();
+
+        let error = settings.validate().unwrap_err().to_string();
+        assert!(error.contains("allowed_origins"), "{error}");
+
+        settings.cors.allowed_origins = vec!["http://app.test".to_owned()];
+        assert!(settings.validate().is_ok());
+    }
+
+    #[test]
     fn producao_recusa_log_e_metrica_sem_token() {
         let mut settings = valid();
         settings.profile = "production".to_owned();
+        settings.security.cookie_secure = false;
 
         let error = settings.validate().unwrap_err().to_string();
         assert!(error.contains("mail.provider"), "{error}");
         assert!(error.contains("metrics.token"), "{error}");
+        assert!(error.contains("cookie_secure"), "{error}");
     }
 
     #[test]

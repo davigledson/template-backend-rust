@@ -18,4 +18,5 @@ pub use devices::{clear_sessions, list as list_sessions, revoke as revoke_sessio
 pub use login::login;
 pub use password::{confirm_reset, request_reset};
 pub use session::{logout, refresh};
+pub use tokens::IssuedTokens;
 pub use verification::{resend as resend_verification, verify as verify_email};

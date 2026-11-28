@@ -14,5 +14,9 @@ allowed_origins = [
     "http://localhost:4173",
 ]
 
+[security]
+# Desenvolvimento local roda em HTTP; em produção o padrão é true.
+cookie_secure = false
+
 [database]
 sqlx_logging = false

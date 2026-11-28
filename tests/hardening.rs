@@ -5,7 +5,7 @@ mod common;
 use axum::http::StatusCode;
 use common::{ADMIN_EMAIL, ADMIN_PASSWORD, Harness};
 use sea_orm::{ConnectionTrait, Statement};
-use serde_json::json;
+use serde_json::{Value, json};
 use template_backend_rust::{
     core::auth::rate_limit::RateLimiter, core::error::AppError, database::connection,
 };
@@ -161,4 +161,129 @@ async fn forwarded_for_forjado_nao_define_o_ip_do_rate_limit() {
 
     assert_eq!(forged, 0);
     assert_eq!(real, 1);
+}
+
+#[tokio::test]
+async fn login_entrega_refresh_em_cookie_http_only() {
+    let app = Harness::spawn().await;
+
+    let response = app
+        .server
+        .post("/api/v1/auth/login")
+        .json(&json!({
+            "email": ADMIN_EMAIL,
+            "password": ADMIN_PASSWORD,
+        }))
+        .await;
+    response.assert_status_ok();
+
+    let cookie = header(&response, "set-cookie");
+    assert!(cookie.starts_with("refresh_token="), "{cookie}");
+    assert!(cookie.contains("HttpOnly"), "{cookie}");
+    assert!(cookie.contains("Secure"), "{cookie}");
+    assert!(cookie.contains("SameSite=Strict"), "{cookie}");
+    assert!(cookie.contains("Path=/api/v1/auth"), "{cookie}");
+    assert!(cookie.contains("Max-Age=604800"), "{cookie}");
+
+    let body: Value = response.json();
+    assert!(body.get("refreshToken").is_none(), "{body}");
+    assert!(body["accessToken"].as_str().is_some(), "{body}");
+}
+
+#[tokio::test]
+async fn refresh_e_logout_usam_o_cookie() {
+    let app = Harness::spawn().await;
+
+    app.server
+        .post("/api/v1/auth/refresh")
+        .await
+        .assert_status(StatusCode::UNAUTHORIZED);
+
+    let login = app
+        .server
+        .post("/api/v1/auth/login")
+        .json(&json!({
+            "email": ADMIN_EMAIL,
+            "password": ADMIN_PASSWORD,
+        }))
+        .await;
+    login.assert_status_ok();
+    let refresh_token = common::refresh_token_from(&login);
+
+    let rotated = common::refresh(&app.server, &refresh_token).await;
+    rotated.assert_status_ok();
+    let rotated_token = common::refresh_token_from(&rotated);
+    assert_ne!(refresh_token, rotated_token);
+
+    let body: Value = rotated.json();
+    assert!(body.get("refreshToken").is_none(), "{body}");
+
+    let logout = common::logout(&app.server, &rotated_token).await;
+    logout.assert_status_no_content();
+    let cleared = header(&logout, "set-cookie");
+    assert!(cleared.starts_with("refresh_token="), "{cleared}");
+    assert!(cleared.contains("Max-Age=0"), "{cleared}");
+
+    common::refresh(&app.server, &rotated_token)
+        .await
+        .assert_status(StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn refresh_recusa_origem_fora_do_cors() {
+    let app = Harness::spawn_with(|settings| {
+        settings.cors.allowed_origins = vec!["http://app.test".to_owned()];
+    })
+    .await;
+
+    let login = app
+        .server
+        .post("/api/v1/auth/login")
+        .json(&json!({
+            "email": ADMIN_EMAIL,
+            "password": ADMIN_PASSWORD,
+        }))
+        .await;
+    login.assert_status_ok();
+    let refresh_token = common::refresh_token_from(&login);
+
+    app.server
+        .post("/api/v1/auth/refresh")
+        .add_header("cookie", common::refresh_cookie(&refresh_token))
+        .add_header("origin", "http://evil.test")
+        .await
+        .assert_status(StatusCode::FORBIDDEN);
+
+    app.server
+        .post("/api/v1/auth/refresh")
+        .add_header("cookie", common::refresh_cookie(&refresh_token))
+        .add_header("origin", "http://app.test")
+        .await
+        .assert_status_ok();
+}
+
+#[tokio::test]
+async fn origem_estranha_e_recusada_mesmo_sem_cors_configurado() {
+    let app = Harness::spawn_with(|settings| {
+        settings.cors.allowed_origins.clear();
+    })
+    .await;
+
+    let login = app
+        .server
+        .post("/api/v1/auth/login")
+        .json(&json!({
+            "email": ADMIN_EMAIL,
+            "password": ADMIN_PASSWORD,
+        }))
+        .await;
+    login.assert_status_ok();
+    let refresh_token = common::refresh_token_from(&login);
+
+    app.server
+        .post("/api/v1/auth/refresh")
+        .add_header("cookie", common::refresh_cookie(&refresh_token))
+        .add_header("origin", "http://evil.test")
+        .await
+        .assert_status(StatusCode::FORBIDDEN);
 }
