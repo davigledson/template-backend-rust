@@ -241,6 +241,7 @@ interna.
 | Sessão esquecida em dispositivo | `GET/DELETE /auth/sessions` com IP e User-Agent; logout revoga a família |
 | Injeção SQL | SeaORM parametrizado; sem SQL concatenado |
 | Vazamento em log | segredo redigido, 5xx genérico, sem PII |
+| IP forjado no rate limit | `X-Real-IP` ou o último IP do `X-Forwarded-For`; valor inválido cai para o socket |
 | Auto-bloqueio do sistema | exclusão/rebaixamento do último admin bloqueado (fase 4) |
 
 ## Rate limit e reuso
@@ -253,6 +254,12 @@ interna.
   não as do IP.
 - **Fail-open**: Redis indisponível não impede login; o evento vai para o log.
   A segunda barreira é o limite por IP no proxy.
+- **IP do cliente**: com `trust_proxy_headers = true`, a API prefere
+  `X-Real-IP` (valor único definido pelo proxy) e, no `X-Forwarded-For`, usa o
+  **último** IP válido — o que o proxy confiável acrescentou no fim. O primeiro
+  valor da lista é forjável pelo cliente. Assume um proxy na borda; com mais de
+  um, configure o proxy para sobrescrever `X-Real-IP`. Valor que não parseia
+  como IP é ignorado e vale o IP do socket.
 - **Famílias de refresh**: cada login cria uma família; a rotação mantém a
   família. Reapresentar token já consumido revoga a família inteira. Um novo
   login (nova família) não é afetado.

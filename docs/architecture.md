@@ -178,7 +178,7 @@ Quatro camadas transversais, cada uma com um custo e uma decisão:
 
 | Camada | Onde | Decisão |
 |---|---|---|
-| IP do cliente | `core/client_ip.rs` | só confia em `X-Forwarded-For` com `server.trust_proxy_headers = true` |
+| IP do cliente | `core/client_ip.rs` | com `server.trust_proxy_headers = true`, prefere `X-Real-IP` e usa o último IP do `X-Forwarded-For` |
 | Rate limit | `core/auth/rate_limit.rs` | janela fixa no Redis, por conta e IP; fail-open |
 | Idempotência | `core/idempotency/` | obrigatória em `POST` de recurso; resposta 24 h; lock 60 s |
 | Métricas | `core/metrics.rs` | recorder global via `OnceLock`; `/metrics` fora da medição |

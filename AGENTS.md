@@ -49,6 +49,8 @@ verificáveis e não opcionais. O "porquê" completo está em `docs/`.
 | `just prod-down` | derruba a stack de deploy |
 | `just prod-logs` | acompanha os logs da stack de deploy |
 | `just smoke <url> [token]` | smoke pós-deploy de uma URL publicada |
+| `just bench [duração] [conexões]` | benchmark dos endpoints principais (oha ou ab) |
+| `just db-stats` | consultas mais caras e em execução no Postgres |
 | `just admin-create <email> "<nome>" [true]` | cria admin (primeiro, ou outro com `true`) |
 | `just admin-promote <email>` | promove usuário a admin |
 | `just admin-reset-password <email>` | redefine senha e invalida sessões |
@@ -244,7 +246,9 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
   replay) para não consumir o orçamento de sessões/refresh no Redis.
 - `/metrics` ligado exige `APP__METRICS__TOKEN` em produção; sem token o boot
   falha. Em desenvolvimento, sem token a rota fica pública.
-- Meça antes de otimizar.
+- Meça antes de otimizar: `just bench` (oha/ab) com build release e
+  `just db-stats` antes de mexer em pool, índice ou camada HTTP. Registre o
+  resultado em `docs/capacity.md` com data, host e volume de dados.
 
 ## Testes
 
@@ -371,7 +375,11 @@ Se não couber em uma pasta, o módulo está grande demais.
 - `just doctor` mostra o estado da infra local; `just prod-up`, `just prod-migrate`
   e `just prod-logs` operam a stack de deploy.
 - Logs: `just logs` (infra) e o log da API; nunca despeje o arquivo inteiro.
+  Cada requisição tem um access log em `INFO` com `request_id`, método, caminho,
+  status e `duration_ms`.
 - Erro 500 só devolve mensagem genérica; o detalhe está no log com `x-request-id`.
+- Query lenta: `just db-stats` (usa `pg_stat_statements`); o Postgres também
+  grava no log as consultas acima de 500 ms.
 
 ## Links
 

@@ -205,6 +205,34 @@ Os gauges de outbox são recalculados pelo processo da **API** a partir do
 banco: o worker não expõe `/metrics`. Se o worker parar, `pending` sobe e
 `sent_24h` para de crescer — é o sintoma esperado.
 
+## Benchmark
+
+`just bench` mede os endpoints principais com `oha` (preferido: p50, p95 e p99)
+ou `ab` (fallback). Precisa de um admin e da infra local:
+
+```bash
+# senha pedida no prompt ou via ADMIN_PASSWORD
+just admin-create bench@example.com "Bench" true
+BENCH_EMAIL=bench@example.com BENCH_PASSWORD='...' just bench 10s 20
+```
+
+O script aquece cada rota e mede `GET /health`, `/auth/me`, lista de usuários,
+um usuário e auditoria. Login fica fora de propósito: cada iteração criaria uma
+sessão e esbarraria no rate limit.
+
+Regras para o número valer:
+
+- build **release** (`cargo run --release --bin api`), nunca debug;
+- mesmo host, mesmo Postgres e mesma massa de dados;
+- registre data, vCPU/RAM, contagem das tabelas, RPS e p50/p95/p99 em
+  `capacity.md`;
+- compare antes/depois no mesmo dia; máquina quente e runner compartilhado
+  distorcem;
+- não coloque no CI: benchmark em runner compartilhado é ruído.
+
+Se `oha` não estiver instalado, use `cargo install oha` ou baixe o binário em
+<https://github.com/hatoo/oha>. Com `ab`, o p99 vem da tabela de percentis dele.
+
 ## Rate limit e lockout
 
 - Chaves: `auth:login:fail:account:<sha256(email)>` e
@@ -234,15 +262,47 @@ o usuário pelo log do 429.
   `EXPLAIN`; corrija índice/consulta em vez de aumentar o limite.
 - Não use a API para relatório/backfill longo: isso pertence ao worker ou a uma
   conexão própria.
+- O Compose liga `pg_stat_statements` e grava no log do Postgres toda consulta
+  acima de **500 ms** (`log_min_duration_statement=500ms`). Depois de mudar o
+  comando do container, recrie o serviço (`just down && just up`); a extensão é
+  criada por `just db-stats`.
+
+```bash
+just db-stats                     # top consultas por tempo total + queries em execução
+just logs | grep duration         # consultas lentas registradas pelo Postgres
+
+# zerar as estatísticas depois de uma mudança de índice
+psql "$APP__DATABASE__URL" -c 'select pg_stat_statements_reset()'
+```
+
+`just db-stats` usa o superusuário do Compose e consegue criar a extensão. Em
+Postgres gerenciado, o usuário da aplicação normalmente não pode:
+`CREATE EXTENSION` e o `shared_preload_libraries` precisam ser habilitados pelo
+provedor. O `statement_timeout` continua funcionando sem a extensão.
 
 ## Logs e rastreio
 
 - JSON em produção (`log.format = json`), com `x-request-id` em cada linha.
-- Para seguir uma requisição: pegue o `x-request-id` da resposta e filtre o
-  log. O span do service herda o id do HTTP.
+- Cada requisição emite um access log em `INFO` com `request_id`, `method`,
+  `path`, `status` e `duration_ms`. Falha de servidor (5xx) sai em `ERROR` com a
+  classificação. Cabeçalhos e query string ficam fora.
+- Para seguir uma requisição:
+
+```bash
+# o id vem no header da resposta ou no corpo do Problem Details
+curl -sS -D - http://127.0.0.1:8080/health -o /dev/null | grep -i x-request-id
+
+# API em JSON: uma linha por requisição
+cargo run --bin api 2>&1 | jq -c 'select(.fields.request_id == "<id>")'
+```
+
+- `x-request-id` enviado pelo cliente é aceito se for texto curto (até 64
+  caracteres, sem controle); sem ele, a API gera um UUID.
 - 5xx devolve mensagem genérica; o detalhe (`DbErr`, caminho) fica só no log.
 - Nada de senha, token ou e-mail completo no log; o provider `log` mascara o
   destinatário.
+- Para desligar o access log em um host apertado, use `log.level = warn`; os
+  erros 5xx continuam em `ERROR`.
 
 ## Incidentes comuns
 

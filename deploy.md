@@ -45,7 +45,7 @@ arquivo de produção, use `APP_ENV_FILE=.env.production just prod-up`.
 | `APP__MAIL__PROVIDER` | sim | `smtp` em produção |
 | `APP__MAIL__SMTP_URL` | com `smtp` | ex.: `smtps://user:senha@host:465` |
 | `APP__MAIL__FROM` | sim | remetente válido |
-| `APP__SERVER__TRUST_PROXY_HEADERS` | não | `true` só atrás de proxy que sobrescreve `X-Forwarded-For` |
+| `APP__SERVER__TRUST_PROXY_HEADERS` | não | `true` só atrás de proxy que define `X-Real-IP` ou acrescenta o cliente no fim do `X-Forwarded-For` |
 | `APP__SECURITY__HSTS_MAX_AGE_SECS` | não | o perfil de produção usa `31536000` |
 | `APP__DOCS__ENABLED` | não | produção desliga `/docs` e `/api-docs` |
 | `APP__METRICS__ENABLED` | não | padrão `true`; em produção exige token ou desligue |
@@ -61,8 +61,13 @@ Também revise, em `config/production.toml` ou por ambiente:
 - `cors.allowed_origins` — vazio por padrão; informe os domínios do front;
 - `server.body_limit_mb` — 1 MB no perfil de produção;
 - `server.worker_threads` — 2 no host de 2 vCPU;
+- `database.statement_timeout_secs` — 5 s no pool da API; `0` desliga;
 - `jobs.timezone` — fuso dos jobs;
 - `log.level` / `log.format` — JSON em produção.
+
+O Compose já liga `pg_stat_statements` e `log_min_duration_statement=500ms` no
+Postgres. Em banco gerenciado, habilite os dois no provedor e crie a extensão
+com um usuário administrador; a aplicação não faz isso no boot.
 
 Segredos nunca entram no repositório nem em TOML.
 

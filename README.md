@@ -127,6 +127,8 @@ Regras práticas:
 | `just prod-admin <args>` | CLI admin na stack de deploy |
 | `just prod-down` / `just prod-logs` | derruba ou acompanha a stack de deploy |
 | `just smoke <url> [token]` | smoke pós-deploy (health, cabeçalhos, login e métricas) |
+| `just bench [duração] [conexões]` | benchmark dos endpoints principais (oha ou ab) |
+| `just db-stats` | consultas mais caras e em execução no Postgres |
 | `just dev` | API com logs legíveis |
 | `just worker` | entrega do outbox e limpeza diária (cron) |
 | `just mail-up` / `just mail-down` | Mailpit local: SMTP 1025 e UI 8025 |
@@ -205,8 +207,9 @@ precisa ter **no mínimo 32 caracteres** e é validado no boot.
 | `APP__LOG__LEVEL` | `info` | nível de log (`debug` em dev) |
 | `RUST_LOG` | — | override fino de logs do `tracing` |
 
-`server.trust_proxy_headers` só deve ser `true` atrás de um proxy que sobrescreve
-o cabeçalho. Conexão direta permite forjar o IP.
+`server.trust_proxy_headers` só deve ser `true` atrás de um proxy que define
+`X-Real-IP` ou acrescenta o cliente no fim do `X-Forwarded-For`. Conexão direta
+permite forjar o cabeçalho.
 
 ### E-mail
 
@@ -260,6 +263,11 @@ cabeçalhos `nosniff`, `DENY`, `no-referrer` e `Permissions-Policy`. HSTS só é
 enviado com `security.hsts_max_age_secs > 0`. Se `metrics.token` estiver
 definido, `/metrics` exige `Authorization: Bearer <token>`; em produção, a rota
 ligada sem token impede o boot.
+
+Cada requisição gera um access log em `INFO` com `request_id`, método, caminho,
+status e `duration_ms`. Cabeçalhos (`authorization`, `cookie`) e query string
+não entram no log. Em produção o `x-request-id` aparece em todas as linhas do
+JSON; use-o para seguir uma requisição.
 
 ## Endpoints de infraestrutura
 

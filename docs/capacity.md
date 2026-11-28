@@ -48,6 +48,35 @@ caber em `postgres max_connections` (40), com folga para `psql` e migrations.
    indica `max_connections` baixo ou query lenta.
 5. **Memória**: `docker stats` por serviço contra a tabela acima.
 
+## Benchmark
+
+Antes de decidir capacidade, meça com build release e a mesma massa de dados:
+
+```bash
+cargo run --release --bin api
+just admin-create bench@example.com "Bench" true
+BENCH_EMAIL=bench@example.com BENCH_PASSWORD='...' just bench 10s 20
+just db-stats
+```
+
+Registre uma linha por rodada (a tabela começa vazia de propósito; número sem
+data e sem massa não serve para comparar):
+
+| Data | Commit | Host | Dados | Endpoint | RPS | p50 | p95 | p99 |
+|---|---|---|---|---|---:|---:|---:|---:|
+| — | — | — | — | — | — | — | — | — |
+
+Leitura do resultado:
+
+- **Throughput não é latência.** Em rota presa ao banco, dobrar o RPS pode
+  reduzir o p95 só 20-30%, porque o tempo é espera no Postgres.
+- Comparação justa é antes/depois no mesmo host, mesmo dia e mesma massa. Debug,
+  máquina quente e runner compartilhado distorcem.
+- `statement_timeout` evita request pendurado; não acelera consulta. Query lenta
+  se corrige com índice/consulta, não com limite maior.
+- O login é medido à parte: Argon2 e rate limit mudam o resultado e cada
+  iteração cria sessão.
+
 ## Quando crescer
 
 | Sinal | Primeiro passo | Depois |
@@ -62,14 +91,20 @@ separe Postgres do host da aplicação antes de pensar em microserviço.
 
 ## Referência do ACEC (Java) no mesmo hardware
 
-Estimativa do plano original, para calibrar expectativa:
+No repositório da ACEC, o startup medido em desenvolvimento ficou entre 1,0 e
+3,3 s (Spring Boot 4 com lazy initialization); em container, o palpite é 3-10 s.
+O container roda com `-Xmx512m`, metaspace de 192 MB e `mem_limit: 900m`. Não
+existe benchmark de throughput no repositório e o banco local tem só dados de
+demonstração, então não há RPS confiável para comparar.
 
-| Métrica | Java | Template Rust |
-|---|---:|---:|
-| Startup | 8–15 s | 0,1–0,3 s |
-| RSS sob carga | 600–900 MB | 80–150 MB |
-| RPS `GET /{id}` | 800–2.000 | 2.000–4.000 |
-| p99 | 20–60 ms | 6–15 ms |
+| Métrica | ACEC Java | Expectativa para este template |
+|---|---|---|
+| Startup | 1-3 s local; 3-10 s no container | 0,1-0,3 s |
+| RSS em repouso | ~700 MB (limite 900 MB) | 80-150 MB |
+| CRUD | baseline | 1,2-2,5x, conforme o endpoint |
+| CPU (PDF/relatório) | baseline | 2-4x, se a biblioteca Rust for equivalente |
+| SMTP/HTTP externo | baseline | ~1x: rede domina |
 
-Números de referência, não garantia: medir no host real antes de decidir
-capacidade de produção.
+O ganho mais concreto no host de 1,9 GB é memória: liberar centenas de MB para
+o Postgres costuma render mais que a linguagem. Esses fatores são ordem de
+grandeza, não promessa; `just bench` no mesmo host e com massa real decide.
