@@ -78,7 +78,7 @@ pub async fn change_own_password(
     if !password::verify_async(current_password.to_owned(), user.password_hash.clone()).await? {
         return Err(AppError::Unauthorized("senha atual incorreta".to_owned()));
     }
-    if password::verify_async(new_password.to_owned(), user.password_hash.clone()).await? {
+    if current_password == new_password {
         return Err(AppError::BadRequest(
             "a nova senha deve ser diferente da atual".to_owned(),
         ));
