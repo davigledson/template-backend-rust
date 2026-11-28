@@ -23,6 +23,7 @@ use crate::{
 
 pub const MAX_ATTEMPTS: i32 = 5;
 pub const RETENTION_DAYS: i64 = 30;
+pub const FAILED_RETENTION_DAYS: i64 = 30;
 pub const BATCH_SIZE: u64 = 20;
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -181,6 +182,17 @@ pub async fn retry_all(
 pub async fn purge_sent(db: &DatabaseConnection) -> Result<u64, AppError> {
     let cutoff = Utc::now().fixed_offset() - Duration::days(RETENTION_DAYS);
     Ok(repository::delete_sent_before(db, cutoff).await?)
+}
+
+/// Remove e-mails `failed` cuja última tentativa passou de
+/// `FAILED_RETENTION_DAYS`.
+///
+/// O corpo fica disponível para inspeção e retry dentro da janela; depois disso
+/// a linha inteira sai, evitando crescimento indefinido e códigos antigos no
+/// banco.
+pub async fn purge_failed(db: &DatabaseConnection) -> Result<u64, AppError> {
+    let cutoff = Utc::now().fixed_offset() - Duration::days(FAILED_RETENTION_DAYS);
+    Ok(repository::delete_failed_before(db, cutoff).await?)
 }
 
 /// Backoff exponencial em minutos, com teto de 60.

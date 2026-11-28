@@ -5,6 +5,7 @@
 
 mod common;
 
+use chrono::{Duration, Utc};
 use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, sea_query::Expr};
 use template_backend_rust::{
     core::mail::EmailMessage,
@@ -170,4 +171,38 @@ async fn fluxo_do_outbox_de_email() {
         .expect("processar o reprocessado");
     assert_eq!(summary.sent, 1);
     assert_eq!(recording.subjects(), vec!["Falhou".to_owned()]);
+
+    // --- retenção de failed ---
+    email_service::enqueue(
+        db,
+        EmailMessage {
+            to: "antigo@teste.local".to_owned(),
+            subject: "Antigo".to_owned(),
+            body: "corpo antigo".to_owned(),
+        },
+        "manual-failed-antigo".to_owned(),
+    )
+    .await
+    .expect("enqueue failed antigo");
+
+    Outbox::update_many()
+        .col_expr(OutboxColumn::Status, Expr::value("failed"))
+        .col_expr(
+            OutboxColumn::NextAttemptAt,
+            Expr::value(Utc::now().fixed_offset() - Duration::days(31)),
+        )
+        .filter(OutboxColumn::DedupeKey.eq("manual-failed-antigo"))
+        .exec(db)
+        .await
+        .expect("marcar failed antigo");
+
+    assert!(email_service::purge_failed(db).await.expect("purge") >= 1);
+    assert_eq!(
+        Outbox::find()
+            .filter(OutboxColumn::DedupeKey.eq("manual-failed-antigo"))
+            .count(db)
+            .await
+            .expect("contagem"),
+        0
+    );
 }

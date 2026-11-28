@@ -104,6 +104,7 @@ async fn process_outbox(db: &DatabaseConnection, mailer: &dyn mail::Mailer) {
 
 async fn cleanup(db: &DatabaseConnection, audit_retention_days: u64) {
     purge_sent(db).await;
+    purge_failed(db).await;
     purge_audit(db, audit_retention_days).await;
 }
 
@@ -115,6 +116,18 @@ async fn purge_sent(db: &DatabaseConnection) {
         Ok(_) => {}
         Err(error) => {
             tracing::error!(error = %error, "falha ao limpar o outbox");
+        }
+    }
+}
+
+async fn purge_failed(db: &DatabaseConnection) {
+    match email_service::purge_failed(db).await {
+        Ok(removed) if removed > 0 => {
+            tracing::info!(removed, "outbox failed antigo removido");
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::error!(error = %error, "falha ao limpar outbox failed");
         }
     }
 }

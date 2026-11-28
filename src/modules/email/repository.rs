@@ -146,6 +146,22 @@ pub async fn delete_sent_before(
         .map(|result| result.rows_affected)
 }
 
+/// Remove e-mails `failed` cuja última tentativa ficou antes do corte.
+///
+/// Usa `next_attempt_at` porque o índice de claim já cobre
+/// `(status, next_attempt_at)`; um `failed` mantém o instante da última falha.
+pub async fn delete_failed_before(
+    db: &DatabaseConnection,
+    cutoff: DateTime<FixedOffset>,
+) -> Result<u64, DbErr> {
+    Entity::delete_many()
+        .filter(Column::Status.eq("failed"))
+        .filter(Column::NextAttemptAt.lt(cutoff))
+        .exec(db)
+        .await
+        .map(|result| result.rows_affected)
+}
+
 /// Contagem por status, para as métricas de profundidade do outbox.
 pub async fn count_by_status(db: &DatabaseConnection, status: &str) -> Result<u64, DbErr> {
     Entity::find()
