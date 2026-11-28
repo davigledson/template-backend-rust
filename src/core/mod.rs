@@ -11,5 +11,6 @@ pub mod metrics;
 pub mod openapi;
 pub mod response;
 pub mod shutdown;
+pub mod startup;
 pub mod state;
 pub mod telemetry;

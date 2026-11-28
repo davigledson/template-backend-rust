@@ -8,8 +8,8 @@ use template_backend_rust::{
     app,
     config::Settings,
     core::{
-        auth::jwt::JwtService, cache::Cache, error::AppError, mail, shutdown, state::AppState,
-        telemetry,
+        auth::jwt::JwtService, cache::Cache, error::AppError, mail, shutdown, startup,
+        state::AppState, telemetry,
     },
     database::connection,
     modules::email::service as email_service,
@@ -81,6 +81,10 @@ async fn run(settings: Settings) -> Result<(), AppError> {
         .map_err(AppError::internal)?;
 
     tracing::info!(address = %address, "api ouvindo");
+
+    if let Ok(local) = listener.local_addr() {
+        startup::print_if_development(&config, local);
+    }
 
     axum::serve(
         listener,
