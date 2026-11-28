@@ -249,6 +249,8 @@ produção.
 | `rate_limit.verification_ip_attempts` | 10 | reenvios de confirmação por IP |
 | `security.require_email_verified` | `false` | exige e-mail confirmado para entrar |
 | `security.hsts_max_age_secs` | 0 | HSTS; só faz efeito em HTTPS |
+| `security.cookie_secure` | `true` em produção | `Secure` no cookie de refresh; dev local usa `false` |
+| `security.cookie_same_site` | `strict` | `strict`, `lax` ou `none`; `none` exige `Secure` |
 | `database.statement_timeout_secs` | 5 | limite por statement no pool da API; `0` desliga |
 | `docs.enabled` | `true` | expõe `/docs` e `/api-docs` |
 | `metrics.enabled` | `true` | monta a rota `/metrics`; em produção exige token ou desligar |
@@ -269,6 +271,12 @@ status e `duration_ms`. Cabeçalhos (`authorization`, `cookie`) e query string
 não entram no log. Em produção o `x-request-id` aparece em todas as linhas do
 JSON; use-o para seguir uma requisição.
 
+O refresh em cookie exige CORS com credenciais: o front precisa enviar
+`withCredentials: true` (Axios) e a API responde
+`Access-Control-Allow-Credentials: true` apenas para as origens listadas. Em
+`POST /auth/refresh` e `/auth/logout`, um `Origin` que não seja o host da API
+nem esteja na lista recebe `403`.
+
 ## Endpoints de infraestrutura
 
 | Rota | O que faz |
@@ -285,9 +293,9 @@ Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
 
 | Rota | O que faz |
 |---|---|
-| `POST /api/v1/auth/login` | e-mail + senha → access token (15 min) + refresh token (7 dias); `429` após 5 falhas na conta; `403` se a exigência de e-mail confirmado estiver ligada |
-| `POST /api/v1/auth/refresh` | rotaciona o par; reutilizar um token consumido revoga a família inteira |
-| `POST /api/v1/auth/logout` | revoga o refresh token (204) |
+| `POST /api/v1/auth/login` | e-mail + senha → access token (15 min) no corpo e refresh token (7 dias) em cookie `HttpOnly`; `429` após 5 falhas na conta; `403` se a exigência de e-mail confirmado estiver ligada ou a origem não for permitida |
+| `POST /api/v1/auth/refresh` | lê o refresh do cookie, rotaciona a sessão e devolve novo access token; reutilizar um token consumido revoga a família inteira |
+| `POST /api/v1/auth/logout` | revoga a sessão do cookie e remove o cookie (204) |
 | `GET /api/v1/auth/me` | perfil do usuário autenticado (Bearer) |
 | `PATCH /api/v1/auth/me` | altera o próprio nome (`profile:write`) |
 | `PUT /api/v1/auth/me/password` | senha atual + nova; encerra todas as sessões (204) |
@@ -299,9 +307,15 @@ Erros saem em `application/problem+json` (RFC 9457), inclusive 404 e 405.
 | `DELETE /api/v1/auth/sessions/{familyId}` | encerra outra sessão (204) |
 
 - Senha: **Argon2id**, mínimo de 12 caracteres.
-- Access token: JWT HS256 de 15 min; o refresh rotaciona o par.
-- Refresh token: opaco, uso único e ligado a uma família. Reutilizar um token
-  consumido revoga a família inteira.
+- Access token: JWT HS256 de 15 min. O cliente guarda **em memória**, nunca em
+  `localStorage`.
+- Refresh token: opaco, uso único e ligado a uma família. Vai em cookie
+  `HttpOnly` com `SameSite=Strict` e `Path=/api/v1/auth`; o corpo do login não
+  contém o refresh. Reutilizar um token consumido revoga a família inteira.
+- O cookie usa `Secure` em produção; front e API precisam ser same-site para
+  `Strict`. Se o front estiver em outro site, use `SameSite=None; Secure` e
+  mantenha a origem no CORS.
+- CORS usa credenciais e origens explícitas: `*` é recusado no boot.
 - Trocar senha, papel ou desativar o usuário invalida tokens e sessões na hora.
 - Recuperação de senha: código de 30 min, uso único e amarrado ao e-mail. O
   pedido devolve 204 mesmo para e-mail inexistente.
@@ -372,8 +386,8 @@ Como usar:
 - gere **uma chave por operação lógica** (UUID é uma boa escolha);
 - reutilize a mesma chave **somente no retry** daquela operação;
 - se mudar o corpo, gere outra chave;
-- não use em `/api/v1/auth/*`: login/refresh/logout carregam tokens e ficam fora
-  do replay.
+- não use em `/api/v1/auth/*`: login/refresh/logout carregam tokens e cookie e
+  ficam fora do replay.
 
 Todo `POST` de recurso sob `/api/v1` exige a chave (até 128 caracteres ASCII
 visíveis). A resposta fica 24 h no Redis; repetir a mesma chave devolve status,

@@ -65,13 +65,43 @@ qualquer operação destrutiva. Não use em toda rota: é uma query a mais.
 ## Refresh token
 
 - **Opaco**: 64 caracteres hex (dois UUID v4 sem hífen), sem significado.
-- **Hasheado** com SHA-256 no Redis; o valor em claro só existe no cliente.
+- **Hasheado** com SHA-256 no Redis; o valor em claro existe apenas no cookie
+  `HttpOnly` do cliente, nunca no corpo da resposta.
 - Valor armazenado: `"{user_id}:{token_version}:{family_id}"`.
 - TTL de 7 dias.
 - **Rotação**: cada refresh consome o token em script atômico (GET + DEL +
   marcador de uso) e emite um novo par da mesma família. Reutilizar um token
   consumido revoga a família e devolve `401`.
 - **Logout** apaga o token do Redis e a entrada de sessão do dispositivo.
+
+### Cookie, CORS e CSRF
+
+- `POST /auth/login` grava o refresh em cookie `HttpOnly`, `SameSite=Strict`
+  por padrão, `Path=/api/v1/auth` e `Max-Age` igual ao TTL do refresh.
+- `POST /auth/refresh` e `/auth/logout` leem o cookie, não o corpo. O access
+  token continua no corpo e o cliente o mantém em memória.
+- `Secure` é obrigatório em produção (`security.cookie_secure = true`); o boot
+  recusa `false` no perfil `production`.
+- O cookie exige CORS com credenciais. As origens precisam ser explícitas:
+  `cors.allowed_origins = ["*"]` é recusado no boot.
+- `SameSite=Strict` só funciona se front e API forem **same-site** (ex.:
+  `app.exemplo.com` e `api.exemplo.com`). Front em outro site exige
+  `SameSite=None; Secure` e token anti-CSRF ou checagem de `Origin`.
+- Independentemente do `SameSite`, `refresh` e `logout` recusam com `403` um
+  `Origin` que não seja o host da API nem esteja na lista do CORS. Requisições
+  sem `Origin` (curl, app nativo) não passam por essa checagem.
+- `HttpOnly` impede leitura por JavaScript, mas não impede XSS de fazer
+  requisições autenticadas enquanto a página está aberta. CSP e sanitização
+  continuam necessárias.
+
+### Múltiplas abas
+
+O refresh é rotacionado. Se duas abas chamarem `/auth/refresh` ao mesmo tempo
+com o mesmo cookie, a segunda chega com um token já consumido e o backend
+revoga a família — as duas caem para o login. O front deve serializar o refresh
+entre abas (`BroadcastChannel` ou lock em `localStorage`) e compartilhar o
+access token novo. Alternativa no backend é uma janela de graça para o token
+recém-rotacionado, com perda parcial da detecção de reuso.
 
 ### Revogação em massa
 
@@ -207,7 +237,7 @@ Já configurado em `core/http.rs` e `config`:
 
 - limite de body (`server.body_limit_mb`);
 - timeout de request (`server.request_timeout_secs` → 408);
-- CORS por ambiente;
+- CORS por ambiente, com credenciais e origens exatas (sem `*` com cookie);
 - `x-request-id` propagado/gerado;
 - compressão;
 - trace com `tracing`;

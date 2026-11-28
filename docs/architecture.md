@@ -151,9 +151,12 @@ otimista.
 Detalhes de ameaça e decisão estão em [`security.md`](security.md). Em resumo:
 
 - **Access token** JWT HS256, 15 min, validado por assinatura/expiração no
-  extractor, sem ida ao banco.
+  extractor, sem ida ao banco. Volta no corpo e o cliente guarda em memória.
 - **Refresh token** opaco, hasheado no Redis, rotacionado a cada uso
-  (script Lua com marcador de uso), 7 dias, ligado a uma família.
+  (script Lua com marcador de uso), 7 dias, ligado a uma família. Vai apenas em
+  cookie `HttpOnly`, `SameSite=Strict` por padrão e `Path=/api/v1/auth`.
+- **CORS com credenciais**: origens explícitas, sem `*`; `refresh` e `logout`
+  recusam `Origin` fora da lista. Site cruzado exige `SameSite=None; Secure`.
 - **`token_version`** no usuário: ao trocar senha/papel ou desativar, incrementa
   e invalida refresh tokens e sessões sensíveis imediatamente.
 - Autorização por **permissão** (`auth.require(USERS_WRITE)`), não por `if role

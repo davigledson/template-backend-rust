@@ -149,8 +149,15 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
   sessões sensíveis na hora.
 - Primeiro admin **só por CLI** (`just admin-create`). Nunca rota pública nem seed
   com senha.
-- Access token: 15 min. Refresh: opaco, hasheado no Redis, rotação atômica com
-  marcador de uso (`GET`+`DEL`+`SET` em script).
+- Access token: 15 min. O corpo do login/refresh devolve só ele; o cliente
+  guarda em memória, nunca em `localStorage`.
+- Refresh: opaco, hasheado no Redis, rotação atômica com marcador de uso
+  (`GET`+`DEL`+`SET` em script). Vai apenas em cookie `HttpOnly`, com
+  `Path=/api/v1/auth`, `SameSite` configurável e `Secure` em produção; nunca no
+  corpo da resposta.
+- `POST /auth/refresh` e `/auth/logout` leem o cookie. CORS usa credenciais e
+  origens explícitas (`*` é recusado no boot); `Origin` que não seja o host da
+  API nem esteja na lista recebe `403` nesses dois endpoints.
 - Reuso de refresh já consumido revoga a **família** inteira; o token rotacionado
   daquela família também deixa de valer.
 - Login tem rate limit por conta e por IP (Redis, janela fixa). Redis fora do ar
@@ -222,7 +229,8 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 ## Segurança
 
 - Argon2id, mínimo de 12 caracteres; nunca logar senha, token ou PII.
-- Limite de body, timeouts, CORS por ambiente e `x-request-id` já estão nas camadas.
+- Limite de body, timeouts, CORS por ambiente (credenciais e origens exatas) e
+  `x-request-id` já estão nas camadas.
 - Respostas de `/api/v1` e `/metrics` levam `Cache-Control: no-store` e os
   cabeçalhos de segurança; HSTS só com `security.hsts_max_age_secs > 0`.
 - `/docs` e `/api-docs` são desligados por `docs.enabled` (produção desliga);
@@ -269,7 +277,8 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
   e revise o diff.
 - Rate limit, reuso de refresh e idempotência têm teste de integração próprio.
 - Antes de finalizar: `just fmt && just lint && just test` + smoke real
-  (`/health/ready` e, se mexeu em auth, login → me → refresh → logout).
+  (`/health/ready` e, se mexeu em auth, login → me → refresh → logout com
+  cookie jar: `curl -c`/`-b`).
 
 ## Novo módulo
 

@@ -47,6 +47,8 @@ arquivo de produção, use `APP_ENV_FILE=.env.production just prod-up`.
 | `APP__MAIL__FROM` | sim | remetente válido |
 | `APP__SERVER__TRUST_PROXY_HEADERS` | não | `true` só atrás de proxy que define `X-Real-IP` ou acrescenta o cliente no fim do `X-Forwarded-For` |
 | `APP__SECURITY__HSTS_MAX_AGE_SECS` | não | o perfil de produção usa `31536000` |
+| `APP__SECURITY__COOKIE_SECURE` | não | padrão `true`; produção recusa `false`; exige HTTPS |
+| `APP__SECURITY__COOKIE_SAME_SITE` | não | `strict` (padrão), `lax` ou `none`; `none` exige `Secure` |
 | `APP__DOCS__ENABLED` | não | produção desliga `/docs` e `/api-docs` |
 | `APP__METRICS__ENABLED` | não | padrão `true`; em produção exige token ou desligue |
 | `APP__METRICS__TOKEN` | sim com métricas ligadas | Bearer do `/metrics` (mín. 16); o boot falha sem ele em produção |
@@ -58,12 +60,31 @@ confirmação de e-mail não podem depender de um transporte que só registra. C
 
 Também revise, em `config/production.toml` ou por ambiente:
 
-- `cors.allowed_origins` — vazio por padrão; informe os domínios do front;
+- `cors.allowed_origins` — liste o domínio do front quando ele for
+  cross-origin; `*` é recusado no boot porque o refresh usa cookie com
+  credenciais;
 - `server.body_limit_mb` — 1 MB no perfil de produção;
 - `server.worker_threads` — 2 no host de 2 vCPU;
 - `database.statement_timeout_secs` — 5 s no pool da API; `0` desliga;
 - `jobs.timezone` — fuso dos jobs;
 - `log.level` / `log.format` — JSON em produção.
+
+## Cookie de sessão
+
+O access token volta no corpo e o front o mantém em memória. O refresh token
+vai em cookie `HttpOnly`, `Path=/api/v1/auth`, `SameSite` configurável e
+`Secure` em produção.
+
+- A API precisa estar em **HTTPS**; `security.cookie_secure = false` é recusado
+  no perfil `production`.
+- `SameSite=Strict` é o padrão e funciona quando front e API são same-site
+  (ex.: `app.exemplo.com` + `api.exemplo.com`).
+- Front em outro site (ex.: Vercel + API própria) exige
+  `APP__SECURITY__COOKIE_SAME_SITE=none`, HTTPS e proteção CSRF/`Origin`.
+- O CORS precisa permitir a origem do front com credenciais; o Axios do front
+  usa `withCredentials: true`.
+- O proxy deve preservar os headers `Origin` e `Host` e não reescrever
+  `Set-Cookie`.
 
 O Compose já liga `pg_stat_statements` e `log_min_duration_statement=500ms` no
 Postgres. Em banco gerenciado, habilite os dois no provedor e crie a extensão
@@ -234,8 +255,10 @@ faça backup antes. Confirme com `/health/ready` e `just smoke`.
 - [ ] `APP__MAIL__PROVIDER=smtp` com `smtps://` real; Mailpit desligado.
 - [ ] `docs.enabled = false` em produção pública.
 - [ ] `/metrics` com token (ou `metrics.enabled = false`).
-- [ ] CORS com os domínios reais, sem `*`.
+- [ ] CORS com os domínios reais, sem `*` (obrigatório com cookie).
 - [ ] `trust_proxy_headers = true` só atrás de proxy confiável.
+- [ ] HTTPS ativo e `security.cookie_secure = true`.
+- [ ] `security.cookie_same_site` coerente com a topologia do front.
 - [ ] HSTS ligado quando a API é servida por HTTPS.
 - [ ] `audit.retention_days` compatível com a política de compliance.
 - [ ] Backup e restore testados (`docs/operations.md`).

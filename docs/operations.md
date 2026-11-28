@@ -317,4 +317,8 @@ cargo run --bin api 2>&1 | jq -c 'select(.fields.request_id == "<id>")'
 | Outbox `failed` crescendo | provedor rejeitando | ler `last_error`, corrigir e `retry-all` |
 | 409 na criação de usuário | `Idempotency-Key` reutilizada ou e-mail duplicado | conferir o `detail` do Problem |
 | Sessões caíram todas | Redis reiniciado | esperado: refresh é opaco e vive no Redis |
+| Refresh 401 no navegador | cookie expirado/revogado, `SameSite`/`Secure` incompatível ou site cruzado | conferir `Set-Cookie` no DevTools, `security.cookie_*` e se front/API são same-site |
+| Refresh/logout 403 | `Origin` não é o host da API nem está em `cors.allowed_origins` | incluir a origem exata do front, sem `*` |
+| Duas abas caem após refresh | rotação concorrente do mesmo cookie | front deve serializar o refresh entre abas (`BroadcastChannel`/lock) |
+| Cookie não é enviado | CORS sem `withCredentials`, `Path` errado ou HTTP com `Secure` | conferir `Access-Control-Allow-Credentials` e o path `/api/v1/auth` |
 | Latência alta no login | Argon2 + host saturado | ver CPU e `axum_http_requests_duration_seconds` |

@@ -668,3 +668,29 @@ worker ou uma conexão própria, não o pool da API.
 
 **Revisitar se**: aparecer endpoint legítimo acima de 5 s; nesse caso, ele
 provavelmente pertence a um job, não ao caminho HTTP.
+
+---
+
+## 2026-11-28 — Refresh token em cookie HttpOnly
+
+**Contexto**: o login devolvia `refreshToken` no corpo. Qualquer front que
+guardasse esse valor em `localStorage` o deixaria legível para XSS, com validade
+de 7 dias. O access token em memória limita a janela, mas o refresh é a
+credencial de longa duração.
+
+**Decisão**: o access token continua no corpo e deve ficar só na memória do
+cliente. O refresh passa a viajar em cookie `HttpOnly`, `SameSite=Strict` por
+padrão, `Path=/api/v1/auth` e `Secure` em produção; o corpo do login/refresh não
+contém mais `refreshToken`. `POST /auth/refresh` e `/auth/logout` leem o cookie.
+CORS passa a exigir credenciais e origens explícitas (`*` é recusado no boot), e
+esses dois endpoints recusam `Origin` fora da lista com `403`.
+
+**Consequência**: XSS não consegue exportar o refresh para reutilizar depois,
+mas ainda pode fazer chamadas autenticadas enquanto a página está aberta; CSP e
+sanitização continuam necessárias. O front precisa de `withCredentials: true`,
+de refresh no boot e de coordenação entre abas para não disparar reuso falso.
+`SameSite=Strict` exige front e API same-site; site cruzado exige `None; Secure`
+e proteção CSRF.
+
+**Revisitar se**: o front e a API forem para sites diferentes; aí entra
+`SameSite=None` com token anti-CSRF, ou um BFF no mesmo site.
