@@ -68,6 +68,10 @@ just admin-create admin@empresa.com "Admin"   # primeiro admin
 just dev                      # API em http://localhost:8080
 ```
 
+Com `just dev`, a API imprime um bloco de atalhos (UI do Scalar, JSON do
+OpenAPI, health e as origens do front no CORS) assim que a porta abre; em
+terminal, os links são clicáveis. Em produção o banner não aparece.
+
 Crie o primeiro admin pelo CLI. Em automação, use:
 
 ```bash

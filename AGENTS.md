@@ -74,7 +74,7 @@ src/
 ├── bin/               admin, migrator, worker
 ├── config/            settings/ (figment, uma seção por arquivo)
 ├── core/              auth, cache, client_ip, idempotency, mail, metrics,
-│                      erro, http, response, health, state
+│                      erro, http, response, health, startup, state
 ├── database/          connection + entity (gerada)
 ├── migrations/        migrations in-crate
 ├── modules/           auth, email, users
