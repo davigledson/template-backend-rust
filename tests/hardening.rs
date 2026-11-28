@@ -5,7 +5,10 @@ mod common;
 use axum::http::StatusCode;
 use common::{ADMIN_EMAIL, ADMIN_PASSWORD, Harness};
 use sea_orm::{ConnectionTrait, Statement};
-use template_backend_rust::{core::error::AppError, database::connection};
+use serde_json::json;
+use template_backend_rust::{
+    core::auth::rate_limit::RateLimiter, core::error::AppError, database::connection,
+};
 
 const METRICS_TOKEN: &str = "token-de-teste-123456";
 
@@ -124,4 +127,38 @@ async fn documentacao_e_metricas_podem_ser_desligadas() {
     // A API continua funcionando.
     app.server.get("/health").await.assert_status_ok();
     app.login(ADMIN_EMAIL, ADMIN_PASSWORD).await;
+}
+
+#[tokio::test]
+async fn forwarded_for_forjado_nao_define_o_ip_do_rate_limit() {
+    let app = Harness::spawn_with(|settings| {
+        settings.server.trust_proxy_headers = true;
+    })
+    .await;
+
+    // O cliente forja o primeiro valor; o proxy confiável acrescenta o real no fim.
+    app.server
+        .post("/api/v1/auth/login")
+        .add_header("x-forwarded-for", "10.9.9.9, 203.0.113.9")
+        .json(&json!({
+            "email": "nao-existe@example.com",
+            "password": "senha-errada-123",
+        }))
+        .await
+        .assert_status(StatusCode::UNAUTHORIZED);
+
+    let mut connection = app.cache.pool().get().await.expect("conexão redis");
+    let forged: i64 = redis::cmd("EXISTS")
+        .arg(RateLimiter::ip_key("10.9.9.9"))
+        .query_async(&mut connection)
+        .await
+        .expect("consulta redis");
+    let real: i64 = redis::cmd("EXISTS")
+        .arg(RateLimiter::ip_key("203.0.113.9"))
+        .query_async(&mut connection)
+        .await
+        .expect("consulta redis");
+
+    assert_eq!(forged, 0);
+    assert_eq!(real, 1);
 }

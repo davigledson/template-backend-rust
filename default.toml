@@ -9,7 +9,8 @@ request_timeout_secs = 30
 # Deixe 0 para o Tokio decidir; no servidor de 2 vCPU use 2.
 worker_threads = 0
 body_limit_mb = 2
-# Só habilite atrás de um proxy que sobrescreve X-Forwarded-For.
+# Só habilite atrás de um proxy que define X-Real-IP ou acrescenta o cliente
+# no fim do X-Forwarded-For.
 trust_proxy_headers = false
 
 [database]

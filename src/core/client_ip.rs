@@ -5,7 +5,7 @@
 //! lidos quando `server.trust_proxy_headers = true`, porque qualquer cliente
 //! pode forjar esses cabeçalhos em uma conexão direta.
 
-use std::{convert::Infallible, net::SocketAddr, sync::Arc};
+use std::{convert::Infallible, net::IpAddr, net::SocketAddr, sync::Arc};
 
 use axum::{
     extract::{ConnectInfo, FromRequestParts, Request, State},
@@ -71,13 +71,27 @@ fn forwarded_ip(request: &Request, trusted: bool) -> Option<String> {
             .headers()
             .get(name)
             .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(',').next())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned)
     };
 
-    header("x-forwarded-for").or_else(|| header("x-real-ip"))
+    trusted_forwarded(header("x-real-ip"), header("x-forwarded-for"))
+}
+
+/// `X-Real-IP` é um valor único definido pelo proxy. `X-Forwarded-For` é uma
+/// lista em que o proxy confiável acrescenta o cliente no fim; por isso vale o
+/// último IP válido, e não o primeiro (que o cliente consegue forjar).
+///
+/// Assume um único proxy na borda. Com mais de um, configure o proxy para
+/// sobrescrever `X-Real-IP` em vez de repassar a lista.
+fn trusted_forwarded(real_ip: Option<&str>, forwarded_for: Option<&str>) -> Option<String> {
+    real_ip
+        .and_then(|value| value.trim().parse::<IpAddr>().ok())
+        .or_else(|| {
+            forwarded_for?
+                .rsplit(',')
+                .filter_map(|part| part.trim().parse::<IpAddr>().ok())
+                .next()
+        })
+        .map(|ip| ip.to_string())
 }
 
 /// Limita o tamanho e remove caracteres de controle antes de usar em chave/log.
@@ -104,5 +118,36 @@ mod tests {
         assert_eq!(sanitize("203.0.113.10\n"), "203.0.113.10");
         assert_eq!(sanitize(""), "unknown");
         assert!(sanitize(&"a".repeat(200)).len() <= 64);
+    }
+
+    #[test]
+    fn x_real_ip_tem_prioridade() {
+        assert_eq!(
+            trusted_forwarded(Some("203.0.113.7"), Some("198.51.100.9")),
+            Some("203.0.113.7".to_owned())
+        );
+    }
+
+    #[test]
+    fn usa_o_ultimo_ip_do_forwarded_for() {
+        // O proxy confiável acrescenta o cliente no fim; o início é forjável.
+        assert_eq!(
+            trusted_forwarded(None, Some("10.9.9.9, 203.0.113.7")),
+            Some("203.0.113.7".to_owned())
+        );
+    }
+
+    #[test]
+    fn ignora_forwarded_for_invalido() {
+        assert_eq!(trusted_forwarded(None, Some("nao-e-ip")), None);
+        assert_eq!(trusted_forwarded(Some("nao-e-ip"), None), None);
+    }
+
+    #[test]
+    fn aceita_ipv6() {
+        assert_eq!(
+            trusted_forwarded(None, Some("2001:db8::1")),
+            Some("2001:db8::1".to_owned())
+        );
     }
 }
