@@ -246,6 +246,7 @@ produção.
 | `rate_limit.verification_ip_attempts` | 10 | reenvios de confirmação por IP |
 | `security.require_email_verified` | `false` | exige e-mail confirmado para entrar |
 | `security.hsts_max_age_secs` | 0 | HSTS; só faz efeito em HTTPS |
+| `database.statement_timeout_secs` | 5 | limite por statement no pool da API; `0` desliga |
 | `docs.enabled` | `true` | expõe `/docs` e `/api-docs` |
 | `metrics.enabled` | `true` | monta a rota `/metrics`; em produção exige token ou desligar |
 | `metrics.token` | vazio | Bearer do `/metrics` (mín. 16); obrigatório em produção com a rota ligada |

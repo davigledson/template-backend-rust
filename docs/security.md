@@ -190,7 +190,8 @@ O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
 - O corpo é apagado no mesmo update que marca o e-mail como `sent`: a linha
   mantém destinatário, assunto e datas por até 30 dias, mas não o código de uso
   único. Itens `failed` ainda guardam o corpo para permitir reprocessamento
-  manual; não grave segredo além do necessário.
+  manual por até 30 dias; depois disso a linha é expurgada. Não grave segredo
+  além do necessário.
 - `APP__MAIL__SMTP_URL` contém credenciais e é redigida no `Debug`; só no
   ambiente. Em produção, `mail.provider = log` é recusado no boot: o template
   não aceita recuperação de senha sem um transporte real.

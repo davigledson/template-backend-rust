@@ -645,3 +645,26 @@ podem ser repetidas com a mesma `Idempotency-Key`.
 **Revisitar se**: houver um endpoint de criação que legitimamente devolva mais
 de 256 KiB e precise de replay; nesse caso, avalie um Redis separado para
 idempotência.
+
+---
+
+## 2026-11-28 — Guardrails de banco e retenção do outbox
+
+**Contexto**: uma query lenta podia prender uma das 8 conexões do pool por até
+30 s e derrubar a API inteira; a listagem de usuários ordenava sem índice; e
+`failed` guardava corpo e linha para sempre.
+
+**Decisão**: a API aplica `statement_timeout` de 5 s como startup option do
+pool (worker, migrator e CLI ficam sem o limite) e traduz `57014` para `503`.
+Adiciona índices `(created_at DESC, id DESC)` e
+`(role, active, created_at DESC, id DESC)` em `users`, removendo o antigo
+`(role, active)`, que virou prefixo do novo. O job diário expurga `failed` após
+30 dias, igual a `sent`.
+
+**Consequência**: query fora do padrão falha cedo e libera a conexão; listagem
+padrão não ordena a tabela; `failed` continua inspecionável/retentável por 30
+dias e depois sai. Quem precisar de uma consulta analítica longa deve usar o
+worker ou uma conexão própria, não o pool da API.
+
+**Revisitar se**: aparecer endpoint legítimo acima de 5 s; nesse caso, ele
+provavelmente pertence a um job, não ao caminho HTTP.

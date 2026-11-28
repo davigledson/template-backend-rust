@@ -25,6 +25,7 @@ Postgres cresce. O `mem_limit` é teto, não reserva.
 | Conexões mínimas | `[database] min_connections` | 1 |
 | Threads do Tokio | `[server] worker_threads` | 2 em produção, 0 = automático |
 | Timeout de request | `[server] request_timeout_secs` | 30 |
+| Statement timeout (API) | `[database] statement_timeout_secs` | 5; worker/migrations não usam |
 | Limite de body | `[server] body_limit_mb` | 2 em dev, 1 em produção |
 | Pool do Redis | `[redis] pool_size` | 8 |
 | Tarefas de senha simultâneas | `MAX_CONCURRENT_PASSWORD_TASKS` em `core/auth/password.rs` | 2 (≈38 MiB de pico) |

@@ -109,7 +109,7 @@ Estados: `pending` → `processing` → `sent` ou `pending` (retry) → `failed`
 após 5 tentativas. Backoff: 1, 2, 4, 8, 16 min. `dedupe_key` evita linha
 duplicada. Ao marcar `sent`, o corpo é apagado; a linha fica só com metadados e
 é removida após 30 dias pelo job diário. `failed` mantém o corpo para permitir
-`retry` manual.
+`retry` manual dentro da janela e também é removido após 30 dias.
 
 ```bash
 just outbox-list                      # failed, 20 itens
@@ -224,6 +224,16 @@ docker compose --project-directory . -f docker/compose.deploy.yml exec redis red
 
 Cuidado: o hash não revela o e-mail. Prefira esperar a janela ou identificar
 o usuário pelo log do 429.
+
+## Banco e consultas
+
+- A API aplica `statement_timeout` de 5 s no pool; worker, migrator e CLI não
+  usam o limite. Uma query cancelada (`57014`) vira `503` com Problem Details e
+  log `consulta cancelada por statement_timeout`.
+- Se isso aparecer com frequência, investigue com `pg_stat_statements` e
+  `EXPLAIN`; corrija índice/consulta em vez de aumentar o limite.
+- Não use a API para relatório/backfill longo: isso pertence ao worker ou a uma
+  conexão própria.
 
 ## Logs e rastreio
 

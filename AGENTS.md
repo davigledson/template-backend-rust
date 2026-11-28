@@ -187,8 +187,8 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 - O worker (`src/jobs/`) só roda com `jobs.enabled = true`; job novo entra em
   `jobs::run`, com duração logada e sem segurar o tick.
 - Entrega é at-least-once: o consumidor/provedor precisa tolerar duplicata.
-- Limpeza de `sent` antigos é job diário; não apague `pending`/`failed` sem
-  inspeção.
+- Limpeza de `sent` e `failed` antigos é job diário; a retenção de ambos é de
+  30 dias. Não apague `pending`/`failed` manualmente sem inspeção.
 
 ## Banco e migrations
 
