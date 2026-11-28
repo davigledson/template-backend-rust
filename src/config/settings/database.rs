@@ -12,6 +12,8 @@ pub struct DatabaseSettings {
     pub min_connections: u32,
     pub acquire_timeout_secs: u64,
     pub connect_timeout_secs: u64,
+    /// Limite por statement no pool da API; `0` desliga.
+    pub statement_timeout_secs: u64,
     pub sqlx_logging: bool,
 }
 
@@ -22,6 +24,10 @@ impl DatabaseSettings {
 
     pub fn connect_timeout(&self) -> Duration {
         Duration::from_secs(self.connect_timeout_secs)
+    }
+
+    pub fn statement_timeout(&self) -> Option<Duration> {
+        (self.statement_timeout_secs > 0).then(|| Duration::from_secs(self.statement_timeout_secs))
     }
 
     pub(super) fn collect_errors(&self, problems: &mut Vec<String>) {
@@ -45,6 +51,7 @@ impl Default for DatabaseSettings {
             min_connections: 1,
             acquire_timeout_secs: 5,
             connect_timeout_secs: 5,
+            statement_timeout_secs: 5,
             sqlx_logging: false,
         }
     }
@@ -86,5 +93,14 @@ mod tests {
             ..Default::default()
         };
         assert!(errors(&settings).contains("entre 1 e 100"));
+    }
+
+    #[test]
+    fn statement_timeout_zero_desliga() {
+        let mut settings = DatabaseSettings::default();
+        assert_eq!(settings.statement_timeout(), Some(Duration::from_secs(5)));
+
+        settings.statement_timeout_secs = 0;
+        assert!(settings.statement_timeout().is_none());
     }
 }

@@ -65,7 +65,7 @@ async fn run(settings: Settings) -> Result<(), AppError> {
         "iniciando api"
     );
 
-    let db = connection::connect(&config.database).await?;
+    let db = connection::connect_api(&config.database).await?;
     let cache = Cache::connect(&config.redis)?;
     let jwt = JwtService::new(&config.jwt)?;
     let mailer = mail::from_settings(&config.mail).map_err(AppError::internal)?;

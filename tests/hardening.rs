@@ -4,6 +4,8 @@ mod common;
 
 use axum::http::StatusCode;
 use common::{ADMIN_EMAIL, ADMIN_PASSWORD, Harness};
+use sea_orm::{ConnectionTrait, Statement};
+use template_backend_rust::{core::error::AppError, database::connection};
 
 const METRICS_TOKEN: &str = "token-de-teste-123456";
 
@@ -14,6 +16,41 @@ fn header<'a>(response: &'a axum_test::TestResponse, name: &str) -> &'a str {
         .unwrap_or_else(|| panic!("cabeçalho ausente: {name}"))
         .to_str()
         .expect("cabeçalho ASCII")
+}
+
+#[tokio::test]
+async fn api_aplica_statement_timeout() {
+    let app = Harness::spawn().await;
+
+    let statement = Statement::from_string(
+        app.db.get_database_backend(),
+        "SELECT current_setting('statement_timeout') AS timeout",
+    );
+    let row = app
+        .db
+        .query_one_raw(statement)
+        .await
+        .expect("consulta")
+        .expect("linha");
+    let timeout: String = row.try_get("", "timeout").expect("timeout");
+
+    assert_eq!(timeout, "5s");
+}
+
+#[tokio::test]
+async fn statement_timeout_vira_servico_indisponivel() {
+    let app = Harness::spawn().await;
+    let mut settings = app.settings.database.clone();
+    settings.statement_timeout_secs = 1;
+
+    let db = connection::connect_api(&settings).await.expect("conexão");
+    let statement = Statement::from_string(db.get_database_backend(), "SELECT pg_sleep(2)");
+    let error = db.query_one_raw(statement).await.expect_err("timeout");
+
+    assert_eq!(
+        AppError::from(error).status(),
+        StatusCode::SERVICE_UNAVAILABLE
+    );
 }
 
 #[tokio::test]

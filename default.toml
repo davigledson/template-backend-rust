@@ -18,6 +18,8 @@ max_connections = 8
 min_connections = 1
 acquire_timeout_secs = 5
 connect_timeout_secs = 5
+# Limite por statement no pool da API; 0 desliga. Worker/migrations não usam.
+statement_timeout_secs = 5
 sqlx_logging = false
 
 [redis]

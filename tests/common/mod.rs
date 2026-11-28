@@ -30,6 +30,7 @@ use template_backend_rust::{
         mail::{self, EmailMessage, Mailer, MailerError},
         state::AppState,
     },
+    database::connection,
     database::entity::email_outbox::{Column as OutboxColumn, Entity as Outbox},
     migrations::Migrator,
     modules::{
@@ -159,6 +160,7 @@ pub struct Harness {
     pub db: DatabaseConnection,
     pub cache: Cache,
     pub server: TestServer,
+    pub settings: Settings,
     _database: DatabaseHandle,
     // Por último: containers só caem depois de pools e cleanup.
     _infra: Infra,
@@ -192,7 +194,7 @@ impl Harness {
         settings.validate().expect("configuração de teste");
 
         let cache = Cache::connect(&settings.redis).expect("cache");
-        let db = Database::connect(&settings.database.url)
+        let db = connection::connect_api(&settings.database)
             .await
             .expect("conexão com o postgres");
         Migrator::up(&db, None).await.expect("migrations");
@@ -213,6 +215,7 @@ impl Harness {
 
         let jwt = JwtService::new(&settings.jwt).expect("jwt");
         let mailer = mail::from_settings(&settings.mail).expect("mailer");
+        let settings_for_tests = settings.clone();
         let server = TestServer::new(app::build(AppState::new(
             db.clone(),
             cache.clone(),
@@ -225,6 +228,7 @@ impl Harness {
             db,
             cache,
             server,
+            settings: settings_for_tests,
             _database: DatabaseHandle {
                 admin_url: infra.postgres_url.clone(),
                 name: database_name,

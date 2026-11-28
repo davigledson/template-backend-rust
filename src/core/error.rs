@@ -34,7 +34,7 @@ pub enum AppError {
     #[error("erro de validação")]
     Validation(#[from] validator::ValidationErrors),
     #[error(transparent)]
-    Database(#[from] sea_orm::DbErr),
+    Database(sea_orm::DbErr),
     #[error(transparent)]
     Cache(#[from] crate::core::cache::CacheError),
     #[error(transparent)]
@@ -48,6 +48,36 @@ pub enum AppError {
 impl From<deadpool_redis::PoolError> for AppError {
     fn from(error: deadpool_redis::PoolError) -> Self {
         Self::Cache(crate::core::cache::CacheError::Pool(error))
+    }
+}
+
+impl From<sea_orm::DbErr> for AppError {
+    fn from(error: sea_orm::DbErr) -> Self {
+        if is_statement_timeout(&error) {
+            tracing::warn!(error = %error, "consulta cancelada por statement_timeout");
+            return Self::Unavailable(
+                "a consulta excedeu o tempo limite; tente novamente".to_owned(),
+            );
+        }
+
+        Self::Database(error)
+    }
+}
+
+/// `57014` é `query_canceled`, o SQLSTATE emitido pelo `statement_timeout`.
+fn is_statement_timeout(error: &sea_orm::DbErr) -> bool {
+    use sea_orm::{DbErr, RuntimeErr};
+    use std::ops::Deref;
+
+    match error {
+        DbErr::Query(RuntimeErr::SqlxError(error)) | DbErr::Exec(RuntimeErr::SqlxError(error)) => {
+            matches!(
+                error.deref(),
+                sea_orm::sqlx::Error::Database(database)
+                    if database.code().as_deref() == Some("57014")
+            )
+        }
+        _ => false,
     }
 }
 
@@ -192,5 +222,11 @@ mod tests {
         let text = String::from_utf8_lossy(&body);
         assert!(!text.contains("senha do banco"), "{text}");
         assert!(text.contains("Não foi possível concluir"), "{text}");
+    }
+
+    #[test]
+    fn erro_interno_nao_e_tratado_como_timeout() {
+        let error = sea_orm::DbErr::Query(sea_orm::RuntimeErr::Internal("falha".to_owned()));
+        assert!(!is_statement_timeout(&error));
     }
 }
