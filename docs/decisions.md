@@ -486,8 +486,9 @@ tinha como desligar a documentação.
 `metrics.token` adiciona Bearer opcional com comparação em tempo constante.
 
 **Consequência**: o proxy ainda pode reforçar HSTS/CSP e esconder rotas. Sem
-token, `/metrics` continua público por decisão explícita; a rede precisa
-restringir. A UI de documentação deixa de existir por padrão em produção.
+token, `/metrics` continua público em desenvolvimento; em produção, o ADR de
+2026-11-28 passa a exigir token com a rota ligada. A UI de documentação deixa de
+existir por padrão em produção.
 
 **Revisitar se**: for necessário expor métricas em porta separada (aí o listener
 dedicado substitui o token) ou servir a documentação publicamente.
@@ -620,3 +621,27 @@ as claims ainda digam `admin`. Custa uma query a mais por leitura de auditoria.
 
 **Revisitar se**: a auditoria ganhar outras rotas ou a validação de sessão virar
 um extractor compartilhado para todas as rotas autenticadas.
+
+---
+
+## 2026-11-28 — Produção recusa defaults de desenvolvimento
+
+**Contexto**: três defaults seguros para dev eram perigosos em produção:
+`mail.provider = log` descartava recuperação/confirmação de senha,
+`metrics.enabled = true` sem token expunha a telemetria e a idempotência podia
+guardar respostas grandes no mesmo Redis de sessões/refresh. O Argon2 também
+podia abrir dezenas de tarefas e estourar o `mem_limit` do API.
+
+**Decisão**: `Settings::validate` recusa `production` com `mail.provider = log`
+ou com `/metrics` ligado e sem token. A idempotência guarda no máximo 256 KiB;
+acima disso a resposta passa sem replay. O Argon2 roda com no máximo duas
+tarefas simultâneas por processo.
+
+**Consequência**: o deploy falha cedo em vez de descobrir o problema em
+produção. CI e compose precisam definir SMTP e `APP__METRICS__TOKEN`, ou
+desligar a rota. Respostas grandes de `POST` continuam funcionando, mas não
+podem ser repetidas com a mesma `Idempotency-Key`.
+
+**Revisitar se**: houver um endpoint de criação que legitimamente devolva mais
+de 256 KiB e precise de replay; nesse caso, avalie um Redis separado para
+idempotência.

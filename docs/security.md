@@ -136,8 +136,8 @@ O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
   pedidos por conta e 10 por IP na janela.
 - `security.require_email_verified = true` faz o login devolver `403` enquanto o
   e-mail não for confirmado. Padrão `false`: o template não depende de SMTP para
-  funcionar. O boot recusa a combinação com `mail.provider = log`, porque o
-  código nunca sairia do outbox.
+  funcionar. Em produção, `mail.provider = log` é recusado no boot porque
+  recuperação de senha e confirmação nunca sairiam do outbox.
 - O envio é best-effort: a conta é criada mesmo se Redis/SMTP falharem; o
   usuário pode pedir reenvio depois.
 - Para ligar a exigência em uma base existente, rode `admin verify-email --all`
@@ -192,7 +192,8 @@ O aviso de troca vai para o outbox com o nome do usuário, nunca com a senha.
   único. Itens `failed` ainda guardam o corpo para permitir reprocessamento
   manual; não grave segredo além do necessário.
 - `APP__MAIL__SMTP_URL` contém credenciais e é redigida no `Debug`; só no
-  ambiente.
+  ambiente. Em produção, `mail.provider = log` é recusado no boot: o template
+  não aceita recuperação de senha sem um transporte real.
 - O worker entrega at-least-once: não use e-mail como confirmação única de
   operação financeira sem chave de idempotência no provedor.
 - Mailpit é apenas local (`127.0.0.1:1025/8025`), sem TLS nem autenticação, e
@@ -217,9 +218,9 @@ Já configurado em `core/http.rs` e `config`:
   métricas não ficarem em cache.
 
 A documentação (`/docs` e `/api-docs/openapi.json`) é controlada por
-`docs.enabled`; o perfil de produção desliga. O `/metrics` aceita um Bearer
-opcional em `metrics.token` (mínimo 16 caracteres); sem token, restrinja a rota
-na rede/proxy.
+`docs.enabled`; o perfil de produção desliga. O `/metrics` aceita um Bearer em
+`metrics.token` (mínimo 16 caracteres); em produção, a rota ligada sem token
+impede o boot. Em desenvolvimento, sem token a rota fica pública.
 
 Erros saem em `application/problem+json` e 5xx nunca vaza `DbErr`/mensagem
 interna.

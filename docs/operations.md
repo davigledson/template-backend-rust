@@ -50,9 +50,10 @@ just smoke http://127.0.0.1:8080 "$APP__METRICS__TOKEN"
 ```
 
 O smoke cobre `/health`, `/health/ready`, cabeçalhos de segurança, login
-inválido e, quando recebe o token, `/metrics`. Se `APP__METRICS__TOKEN` estiver
-vazio, a checagem de métricas é pulada. O perfil de produção desliga `/docs` por
-padrão; ligue `APP__DOCS__ENABLED=true` apenas atrás de proteção.
+inválido e `/metrics` com o token configurado. Em produção, `APP__METRICS__TOKEN`
+é obrigatório com a rota ligada; sem token a checagem de métricas é pulada
+apenas em desenvolvimento. O perfil de produção desliga `/docs` por padrão;
+ligue `APP__DOCS__ENABLED=true` apenas atrás de proteção.
 
 **Rollback**: volte a tag da imagem e suba de novo. Migration é
 *forward-only*: se a versão nova exigiu coluna, o binário antigo só volta se
@@ -131,8 +132,9 @@ select status, count(*) from email_outbox group by status order by 2 desc;
 ## Confirmação de e-mail e rollout
 
 O reenvio é público (`POST /auth/email/resend` com o e-mail no corpo) e sempre
-devolve `204`; o limite é por conta e por IP. O boot **recusa** subir com
-`security.require_email_verified = true` e `mail.provider = log`.
+devolve `204`; o limite é por conta e por IP. Em produção, o boot **recusa**
+subir com `mail.provider = log`; com `security.require_email_verified = true`
+isso vale para qualquer perfil.
 
 Para ligar a exigência em uma base que já tem usuários:
 
@@ -170,10 +172,11 @@ edite ou apague uma linha por SQL fora dessa política sem registrar o motivo.
 
 ## Métricas
 
-`/metrics` é Prometheus. Com `metrics.token` vazio fica sem autenticação:
-**restrinja no proxy** e não exponha na internet. Com token definido (mínimo 16
-caracteres), exige `Authorization: Bearer <token>`; a comparação é em tempo
-constante. Para desligar a rota, use `metrics.enabled = false`.
+`/metrics` é Prometheus. Em produção, com a rota ligada, `metrics.token` é
+obrigatório e o boot falha sem ele (mínimo 16 caracteres); a autenticação é
+`Authorization: Bearer <token>`, comparada em tempo constante. Em
+desenvolvimento, sem token a rota fica pública. Para desligar a rota, use
+`metrics.enabled = false`.
 
 | Métrica | Tipo | Lê assim |
 |---|---|---|

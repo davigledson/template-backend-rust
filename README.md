@@ -212,7 +212,7 @@ o cabeçalho. Conexão direta permite forjar o IP.
 
 | Chave | Padrão | O que faz |
 |---|---|---|
-| `mail.provider` | `log` | `log` registra sem enviar; `smtp` envia de verdade |
+| `mail.provider` | `log` | `log` registra sem enviar (só dev); `smtp` envia de verdade. Em produção, `log` é recusado no boot |
 | `mail.from` | `nao-responda@example.com` | remetente |
 | `mail.smtp_url` | vazio | obrigatório com `provider = smtp` |
 
@@ -247,8 +247,8 @@ produção.
 | `security.require_email_verified` | `false` | exige e-mail confirmado para entrar |
 | `security.hsts_max_age_secs` | 0 | HSTS; só faz efeito em HTTPS |
 | `docs.enabled` | `true` | expõe `/docs` e `/api-docs` |
-| `metrics.enabled` | `true` | monta a rota `/metrics` |
-| `metrics.token` | vazio | Bearer opcional do `/metrics` (mín. 16) |
+| `metrics.enabled` | `true` | monta a rota `/metrics`; em produção exige token ou desligar |
+| `metrics.token` | vazio | Bearer do `/metrics` (mín. 16); obrigatório em produção com a rota ligada |
 | `audit.retention_days` | 365 | retenção do `audit_log`; `0` mantém tudo |
 
 O rate limit é **fail-open**: se o Redis cair, o login continua e o evento vai
@@ -257,8 +257,8 @@ para o log. A segunda barreira é o limite por IP no proxy.
 As respostas de `/api/v1` e `/metrics` levam `Cache-Control: no-store` e os
 cabeçalhos `nosniff`, `DENY`, `no-referrer` e `Permissions-Policy`. HSTS só é
 enviado com `security.hsts_max_age_secs > 0`. Se `metrics.token` estiver
-definido, `/metrics` exige `Authorization: Bearer <token>`; sem token, restrinja
-a rota na rede/proxy.
+definido, `/metrics` exige `Authorization: Bearer <token>`; em produção, a rota
+ligada sem token impede o boot.
 
 ## Endpoints de infraestrutura
 

@@ -48,9 +48,13 @@ arquivo de produção, use `APP_ENV_FILE=.env.production just prod-up`.
 | `APP__SERVER__TRUST_PROXY_HEADERS` | não | `true` só atrás de proxy que sobrescreve `X-Forwarded-For` |
 | `APP__SECURITY__HSTS_MAX_AGE_SECS` | não | o perfil de produção usa `31536000` |
 | `APP__DOCS__ENABLED` | não | produção desliga `/docs` e `/api-docs` |
-| `APP__METRICS__ENABLED` | não | padrão `true` |
-| `APP__METRICS__TOKEN` | recomendada | Bearer do `/metrics` (mín. 16); sem token, restrinja na rede |
+| `APP__METRICS__ENABLED` | não | padrão `true`; em produção exige token ou desligue |
+| `APP__METRICS__TOKEN` | sim com métricas ligadas | Bearer do `/metrics` (mín. 16); o boot falha sem ele em produção |
 | `APP__AUDIT__RETENTION_DAYS` | não | padrão 365; `0` mantém para sempre |
+
+Em produção, `mail.provider = log` não sobe: recuperação de senha e
+confirmação de e-mail não podem depender de um transporte que só registra. Com
+`metrics.enabled = true`, `APP__METRICS__TOKEN` também é obrigatório.
 
 Também revise, em `config/production.toml` ou por ambiente:
 
@@ -139,8 +143,8 @@ just smoke http://127.0.0.1:8080 "$METRICS_TOKEN"
 O script checa `/health`, `/health/ready`, cabeçalhos de segurança, login
 inválido (`401`) e, quando recebe o token, `/metrics`.
 
-Se `metrics.token` estiver vazio, o `/metrics` fica público; restrinja no proxy
-ou na rede de monitoramento.
+Se `metrics.token` estiver vazio, em desenvolvimento o `/metrics` fica público;
+em produção a API recusa o boot com `metrics.enabled = true` e sem token.
 
 ## Primeiro admin
 
@@ -224,7 +228,7 @@ faça backup antes. Confirme com `/health/ready` e `just smoke`.
 - [ ] Primeiro admin criado (`just prod-admin create ...`).
 - [ ] `APP__MAIL__PROVIDER=smtp` com `smtps://` real; Mailpit desligado.
 - [ ] `docs.enabled = false` em produção pública.
-- [ ] `/metrics` com token ou restrito à rede.
+- [ ] `/metrics` com token (ou `metrics.enabled = false`).
 - [ ] CORS com os domínios reais, sem `*`.
 - [ ] `trust_proxy_headers = true` só atrás de proxy confiável.
 - [ ] HSTS ligado quando a API é servida por HTTPS.

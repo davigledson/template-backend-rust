@@ -164,8 +164,8 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
   `token_version` e ao fingerprint do e-mail; trocar o e-mail zera
   `email_verified_at` e invalida o código anterior. O reenvio é público por
   e-mail (sempre 204, rate limit por conta/IP). `security.require_email_verified`
-  (padrão `false`) transforma a confirmação em requisito de login, mas o boot
-  recusa essa combinação com `mail.provider = log`.
+  (padrão `false`) transforma a confirmação em requisito de login. Em produção,
+  `mail.provider = log` é recusado no boot, independentemente dessa flag.
 - Sessões por dispositivo: uma entrada por família de refresh no Redis
   (`auth:session:<user>:<family>`), com IP e User-Agent. `GET/DELETE
   /auth/sessions` exige `require_session`; a sessão atual só sai pelo logout.
@@ -238,8 +238,12 @@ e `dto/{list,output,write}.rs`, com o `mod.rs` só reexportando a API pública.
 - Sem I/O bloqueante dentro de `async`; sem transação ao redor de HTTP.
 - Job de cron não pode segurar o tick; se passar de ~30 s, vira fila.
 - Rate limit é fail-open por decisão: indisponibilidade de Redis não bloqueia login.
-- `/metrics` sem token continua público; defina `APP__METRICS__TOKEN` ou
-  restrinja no proxy.
+- Argon2 roda no máximo 2 tarefas por processo (`MAX_CONCURRENT_PASSWORD_TASKS`);
+  cada uma usa ~19 MiB. Não remova o semáforo sem medir memória.
+- Idempotência não guarda respostas acima de 256 KiB (a resposta passa, sem
+  replay) para não consumir o orçamento de sessões/refresh no Redis.
+- `/metrics` ligado exige `APP__METRICS__TOKEN` em produção; sem token o boot
+  falha. Em desenvolvimento, sem token a rota fica pública.
 - Meça antes de otimizar.
 
 ## Testes

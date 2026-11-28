@@ -12,7 +12,7 @@ cliente HTTP ──► api (Axum) ──► modules/<feature> ──► core (in
                                     └──► Redis (refresh tokens, rate limit)
 
 cron ─────────► worker (mesmo código, sem HTTP) ──► email_outbox ──► SMTP
-monitor ──────► /metrics (Prometheus; token opcional, restrinja na rede)
+monitor ──────► /metrics (Prometheus; em produção exige token e fica fora da internet)
 ```
 
 - **Um binário de API** expõe tudo em `/api/v1`.
@@ -211,8 +211,10 @@ um replay devolveria refresh já rotacionado, o que revogaria a família. A regr
 - Spans de `login`, `refresh`, `logout`, criação/atualização de usuário e
   processamento do outbox herdam o `x-request-id` do HTTP.
 - `worker` loga resumo e duração de cada job.
-- O endpoint de métricas aceita Bearer opcional (`metrics.token`); sem token,
-  restrinja na rede/proxy. `metrics.enabled = false` remove a rota.
+- O endpoint de métricas aceita Bearer (`metrics.token`). Em produção, com
+  `metrics.enabled = true`, o token é obrigatório e o boot falha sem ele; em
+  desenvolvimento, sem token a rota fica pública. `metrics.enabled = false`
+  remove a rota.
 
 ## Deploy
 
